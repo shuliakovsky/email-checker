@@ -14,16 +14,34 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/mx"      // MX checker initialising
 )
 
+// Version and CommitHash will be set during the build process
+var Version string = "0.0.1"
+var CommitHash string = ""
+
+func printVersion() {
+	fmt.Printf("email-checker version: %s\n", Version)
+	if CommitHash != "" {
+		fmt.Printf("commit hash: %s\n", CommitHash)
+	}
+}
 func main() {
 	// Define flag for email input
 	emails := flag.String("emails", "", "Comma-separated list of emails")
 	dnsServer := flag.String("dns", "1.1.1.1", "DNS server IP address")
+	version := flag.Bool("version", false, "Display the current version of the application")
 	flag.Parse() // Parse flags
 
+	// Print version
+	if *version {
+		printVersion()
+		return
+	}
 	// Terminate if emails flag is empty
 	if *emails == "" {
+		printVersion()
 		log.Fatal("Please provide emails using --emails flag")
 	}
+
 	// Setup custom resolver
 	mx.InitResolver(*dnsServer)
 
