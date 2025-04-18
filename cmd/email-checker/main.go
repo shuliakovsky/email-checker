@@ -11,17 +11,21 @@ import (
 	// Internal packages
 	"github.com/shuliakovsky/email-checker/internal/checker" // Email processing
 	"github.com/shuliakovsky/email-checker/internal/logger"  // Logging
+	"github.com/shuliakovsky/email-checker/internal/mx"      // MX checker initialising
 )
 
 func main() {
 	// Define flag for email input
 	emails := flag.String("emails", "", "Comma-separated list of emails")
+	dnsServer := flag.String("dns", "1.1.1.1", "DNS server IP address")
 	flag.Parse() // Parse flags
 
 	// Terminate if emails flag is empty
 	if *emails == "" {
 		log.Fatal("Please provide emails using --emails flag")
 	}
+	// Setup custom resolver
+	mx.InitResolver(*dnsServer)
 
 	// Initialize logger
 	logger.Init()
