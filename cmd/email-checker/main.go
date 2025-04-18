@@ -9,9 +9,10 @@ import (
 	"strings"       // String operations
 
 	// Internal packages
-	"github.com/shuliakovsky/email-checker/internal/checker" // Email processing
-	"github.com/shuliakovsky/email-checker/internal/logger"  // Logging
-	"github.com/shuliakovsky/email-checker/internal/mx"      // MX checker initialising
+	"github.com/shuliakovsky/email-checker/internal/checker"    // Email processing
+	"github.com/shuliakovsky/email-checker/internal/disposable" // Disposable domains
+	"github.com/shuliakovsky/email-checker/internal/logger"     // Logging
+	"github.com/shuliakovsky/email-checker/internal/mx"         // MX checker initialising
 )
 
 // Version and CommitHash will be set during the build process
@@ -44,6 +45,11 @@ func main() {
 
 	// Setup custom resolver
 	mx.InitResolver(*dnsServer)
+
+	// Initialize disposable checks
+	if err := disposable.Init(); err != nil {
+		log.Fatalf("Failed to initialize disposable domains: %v", err)
+	}
 
 	// Initialize logger
 	logger.Init()

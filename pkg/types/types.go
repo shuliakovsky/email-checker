@@ -18,6 +18,7 @@ type MXStats struct {
 type EmailReport struct {
 	Email          string  `json:"email"`                     // The email address being processed
 	Valid          bool    `json:"valid"`                     // Indicates whether the email has a valid format
+	Disposable     bool    `json:"disposable"`                // Indicates whether the domain is disposal
 	Exists         *bool   `json:"exists,omitempty"`          // Indicates whether the email exists (nil if not verified)
 	MX             MXStats `json:"mx"`                        // Contains MX record-related information
 	PermanentError bool    `json:"permanent_error,omitempty"` // Indicates if a permanent error occurred

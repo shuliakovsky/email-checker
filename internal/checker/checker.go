@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"github.com/shuliakovsky/email-checker/internal/disposable"
 	"strings"
 	"sync"
 
@@ -62,6 +63,7 @@ func processEmail(email string) types.EmailReport {
 	parts := strings.Split(email, "@")                      // Split email into parts
 	domain := parts[1]                                      // Extract domain
 	logger.Log(fmt.Sprintf("Extracted domain: %s", domain)) // Log domain
+	report.Disposable = disposable.IsDisposable(domain)
 
 	mxRecords, err := mx.GetMXRecords(domain) // Get MX records
 	if err != nil {
