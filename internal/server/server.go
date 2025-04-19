@@ -6,6 +6,7 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/logger"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,8 +29,10 @@ type Server struct {
 	port  string           // Port on which the server listens
 }
 type TaskStatusResponse struct {
-	Status  string              `json:"status"`
-	Results []types.EmailReport `json:"results,omitempty"`
+	Status       string    `json:"status"`                // Current task status
+	TotalResults int       `json:"total_results"`         // Total number of email reports
+	CreatedAt    time.Time `json:"created_at"`            // Task creation timestamp
+	TotalPages   int       `json:"total_pages,omitempty"` // Total pages available (only for completed tasks)
 }
 
 // NewServer creates and returns a new Server instance with the specified port
@@ -48,12 +51,12 @@ func (s *Server) generateID() string {
 // Start initializes the server and begins listening for HTTP requests
 
 func (s *Server) Start() error {
-	router := http.NewServeMux()                            // Create a new HTTP request router
-	router.HandleFunc("/tasks", s.handleTasks)              // Route for task creation
-	router.HandleFunc("/tasks/", s.handleTaskStatus)        // Route for checking task status
-	router.HandleFunc("/swagger/", httpSwagger.WrapHandler) // Route for swagger
-
-	loggedRouter := loggingMiddleware(router) // Wrap the router with logging middleware
+	router := http.NewServeMux()                              // Create a new HTTP request router
+	router.HandleFunc("/tasks", s.handleTasks)                // Route for task creation
+	router.HandleFunc("/tasks/", s.handleTaskStatus)          // Route for checking task status
+	router.HandleFunc("/tasks-results/", s.handleTaskResults) // Route for tasks results
+	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)   // Route for swagger
+	loggedRouter := loggingMiddleware(router)                 // Wrap the router with logging middleware
 
 	return http.ListenAndServe(":"+s.port, loggedRouter) // Start the server
 }
@@ -112,16 +115,74 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare the response with the task's status and results (if available)
-	response := struct {
-		Status  string              `json:"status"`
-		Results []types.EmailReport `json:"results,omitempty"`
-	}{
-		Status:  task.Status,
-		Results: task.Results,
+	// Calculate total pages if task is completed
+	var totalPages int
+	if task.Status == "completed" {
+		totalPages = (len(task.Results) + 99) / 100 // Default 100 items per page
+	}
+
+	// Prepare the response with task metadata
+	response := TaskStatusResponse{
+		Status:       task.Status,
+		TotalResults: len(task.Results),
+		CreatedAt:    task.CreatedAt,
+		TotalPages:   totalPages,
 	}
 
 	// Respond with the task information as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// Add pagination handler
+func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
+	// Extract the task ID from the URL path
+	taskID := r.URL.Path[len("/tasks-results/"):]
+
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+
+	// Set default values if parameters are invalid
+	if perPage <= 0 {
+		perPage = 100
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	// Find the task in the server's task map
+	s.mu.RLock()
+	task, exists := s.tasks[taskID]
+	s.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Task not found", http.StatusNotFound) // Respond with 404 if the task does not exist
+		return
+	}
+
+	// Calculate pagination boundaries
+	start := (page - 1) * perPage
+	if start < 0 || start >= len(task.Results) {
+		start = 0
+	}
+	end := start + perPage
+	if end > len(task.Results) {
+		end = len(task.Results)
+	}
+
+	// Prepare the paginated response
+	response := struct {
+		Data  []types.EmailReport `json:"data"`
+		Page  int                 `json:"page"`
+		Total int                 `json:"total"`
+	}{
+		Data:  task.Results[start:end],
+		Page:  page,
+		Total: len(task.Results),
+	}
+
+	// Respond with the paginated results as JSON
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

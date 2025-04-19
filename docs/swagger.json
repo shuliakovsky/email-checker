@@ -69,6 +69,51 @@
         }
       }
     },
+    "/tasks-results/{task_id}": {
+      "get": {
+        "description": "Get paginated results for completed task",
+        "produces": ["application/json"],
+        "tags": ["tasks"],
+        "summary": "Get paginated results",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Task ID",
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number",
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Items per page",
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 1000
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated response",
+            "schema": {
+              "$ref": "#/definitions/PaginatedResponse"
+            }
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/swagger/": {
       "get": {
         "produces": ["text/html"],
@@ -110,11 +155,41 @@
           "type": "string",
           "example": "completed"
         },
-        "results": {
+        "total_results": {
+          "type": "integer",
+          "example": 1500
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2024-01-15T14:30:00Z"
+        },
+        "total_pages": {
+          "type": "integer",
+          "example": 15
+        }
+      }
+    },
+    "PaginatedResponse": {
+      "type": "object",
+      "properties": {
+        "data": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/types.EmailReport"
           }
+        },
+        "page": {
+          "type": "integer",
+          "example": 2
+        },
+        "per_page": {
+          "type": "integer",
+          "example": 100
+        },
+        "total": {
+          "type": "integer",
+          "example": 1500
         }
       }
     },
