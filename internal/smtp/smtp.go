@@ -223,7 +223,3 @@ func shouldRetry(err error) bool {
 	return strings.Contains(err.Error(), "timeout") || // Retry if timeout occurred
 		strings.Contains(err.Error(), "connection refused")
 }
-
-func init() {
-	logger.Init()
-}

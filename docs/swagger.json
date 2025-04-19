@@ -1,0 +1,198 @@
+{
+  "schemes": ["http"],
+  "swagger": "2.0",
+  "info": {
+    "description": "API for email verification service",
+    "title": "Email Checker API",
+    "contact": {},
+    "version": "1.0"
+  },
+  "host": "localhost:8080",
+  "basePath": "/",
+  "paths": {
+    "/tasks": {
+      "post": {
+        "description": "Create task for email verification",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "tags": ["tasks"],
+        "summary": "Create new verification task",
+        "parameters": [
+          {
+            "description": "Email list",
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/Request"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/TaskIDResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}": {
+      "get": {
+        "description": "Get verification task status and results",
+        "produces": ["application/json"],
+        "tags": ["tasks"],
+        "summary": "Get task status",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Task ID",
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/TaskStatusResponse"
+            }
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/swagger/": {
+      "get": {
+        "produces": ["text/html"],
+        "tags": ["documentation"],
+        "summary": "Get Swagger UI",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Request": {
+      "type": "object",
+      "properties": {
+        "emails": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "TaskIDResponse": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "example": "123456789"
+        }
+      }
+    },
+    "TaskStatusResponse": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "example": "completed"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/types.EmailReport"
+          }
+        }
+      }
+    },
+    "types.EmailReport": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "example": "test@example.com"
+        },
+        "valid": {
+          "type": "boolean",
+          "example": true
+        },
+        "disposable": {
+          "type": "boolean",
+          "example": false
+        },
+        "exists": {
+          "type": "boolean",
+          "example": true
+        },
+        "mx": {
+          "$ref": "#/definitions/types.MXStats"
+        },
+        "permanent_error": {
+          "type": "boolean",
+          "example": false
+        },
+        "error_category": {
+          "type": "string",
+          "example": "server_error"
+        },
+        "ttl": {
+          "type": "integer",
+          "example": 3600
+        },
+        "smtp_error": {
+          "type": "string",
+          "example": "550 Mailbox not found"
+        }
+      }
+    },
+    "types.MXStats": {
+      "type": "object",
+      "properties": {
+        "valid": {
+          "type": "boolean",
+          "example": true
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/types.MXRecord"
+          }
+        },
+        "error": {
+          "type": "string",
+          "example": "MX lookup failed"
+        }
+      }
+    },
+    "types.MXRecord": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "example": "mail.example.com"
+        },
+        "priority": {
+          "type": "integer",
+          "example": 10
+        },
+        "ttl": {
+          "type": "integer",
+          "example": 3600
+        }
+      }
+    }
+  }
+}

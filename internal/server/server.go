@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/shuliakovsky/email-checker/internal/logger"
+	httpSwagger "github.com/swaggo/http-swagger"
 	"net/http"
 	"sync"
 	"time"
 
+	_ "github.com/shuliakovsky/email-checker/docs"
 	"github.com/shuliakovsky/email-checker/internal/checker"
 	"github.com/shuliakovsky/email-checker/pkg/types"
 )
@@ -25,6 +27,10 @@ type Server struct {
 	tasks map[string]*Task // Map of tasks with their unique IDs
 	port  string           // Port on which the server listens
 }
+type TaskStatusResponse struct {
+	Status  string              `json:"status"`
+	Results []types.EmailReport `json:"results,omitempty"`
+}
 
 // NewServer creates and returns a new Server instance with the specified port
 func NewServer(port string) *Server {
@@ -40,10 +46,12 @@ func (s *Server) generateID() string {
 }
 
 // Start initializes the server and begins listening for HTTP requests
+
 func (s *Server) Start() error {
-	router := http.NewServeMux()                     // Create a new HTTP request router
-	router.HandleFunc("/tasks", s.handleTasks)       // Route for task creation
-	router.HandleFunc("/tasks/", s.handleTaskStatus) // Route for checking task status
+	router := http.NewServeMux()                            // Create a new HTTP request router
+	router.HandleFunc("/tasks", s.handleTasks)              // Route for task creation
+	router.HandleFunc("/tasks/", s.handleTaskStatus)        // Route for checking task status
+	router.HandleFunc("/swagger/", httpSwagger.WrapHandler) // Route for swagger
 
 	loggedRouter := loggingMiddleware(router) // Wrap the router with logging middleware
 

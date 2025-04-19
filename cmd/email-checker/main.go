@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// Initialize the logger for application logging
-	logger.Init()
+	logger.Init(*serverMode)
 
 	// Split the provided emails into a list
 	emailList := strings.Split(*emails, ",")
@@ -95,11 +95,12 @@ func startServerMode(port, dns string) {
 	}
 
 	// Initialize the logger
-	logger.Init()
+	logger.Init(true)
 
 	// Create and start the server on the specified port
 	serverMode := server.NewServer(port)
-	log.Printf("Starting server on port %s", port) // Log the server start information
+	printVersion()
+	log.Printf("Starting server on port %s, DNS resolver %s", port, dns) // Log the server start information
 	if err := serverMode.Start(); err != nil {
 		log.Fatal(err) // Log error and exit if the server fails to start
 	}
