@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,20 +9,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shuliakovsky/email-checker/internal/cache"      // Handles caching operations
-	"github.com/shuliakovsky/email-checker/internal/checker"    // Processes email validation logic
-	"github.com/shuliakovsky/email-checker/internal/disposable" // Manages checks for disposable email domains
-	"github.com/shuliakovsky/email-checker/internal/logger"     // Manages application logging
-	"github.com/shuliakovsky/email-checker/internal/mx"         // Initializes MX (Mail Exchange) record resolver
-	"github.com/shuliakovsky/email-checker/internal/server"     // Implements server mode functionality
-	"github.com/shuliakovsky/email-checker/internal/storage"    // Provides storage solutions
+	"github.com/go-redis/redis/v8"
+	"github.com/shuliakovsky/email-checker/internal/cache"
+	"github.com/shuliakovsky/email-checker/internal/checker"
+	"github.com/shuliakovsky/email-checker/internal/disposable"
+	"github.com/shuliakovsky/email-checker/internal/logger"
+	"github.com/shuliakovsky/email-checker/internal/mx"
+	"github.com/shuliakovsky/email-checker/internal/server"
+	"github.com/shuliakovsky/email-checker/internal/storage"
 )
 
-// Version and CommitHash are set during the build process
-var Version string = "0.0.1" // The application version
-var CommitHash string = ""   // Git commit hash (empty by default)
+// Application version information
+var (
+	Version    string = "0.0.1" // Current application version
+	CommitHash string = ""      // Git commit hash from build
+)
 
-// printVersion displays the application version and commit hash (if available)
+// Displays version information from build
 func printVersion() {
 	fmt.Printf("email-checker version: %s\n", Version)
 	if CommitHash != "" {
@@ -29,116 +33,123 @@ func printVersion() {
 	}
 }
 
-// main is the entry point of the application
+// Main entry point with dual operational modes: CLI and Server
 func main() {
-	// Define command-line flags
-	dnsServer := flag.String("dns", "1.1.1.1", "IP address of the DNS server")
-	emails := flag.String("emails", "", "Comma-separated list of email addresses to process")
-	maxWorkers := flag.Int("workers", 10, "Number of concurrent workers for processing")
-	redisAddr := flag.String("redis", "", "Address of the Redis server (e.g., localhost:6379)")
-	redisPass := flag.String("redis-pass", "", "Password for the Redis server")
+	// Command-line flag configurations
+	dnsServer := flag.String("dns", "1.1.1.1", "DNS server IP address")
+	emails := flag.String("emails", "", "Comma-separated email addresses")
+	maxWorkers := flag.Int("workers", 10, "Number of concurrent workers")
+	redisNodes := flag.String("redis", "", "Redis nodes (comma-separated, format: host:port)")
+	redisPass := flag.String("redis-pass", "", "Redis password")
 	redisDB := flag.Int("redis-db", 0, "Redis database number")
-	serverMode := flag.Bool("server", false, "Run the application in server mode")
-	serverPort := flag.String("port", "8080", "Port for the server to listen on")
-	version := flag.Bool("version", false, "Display the current application version")
-	flag.Parse() // Parse the command-line flags
+	serverPort := flag.String("port", "8080", "Server port")
+	serverMode := flag.Bool("server", false, "Run in server mode")
+	version := flag.Bool("version", false, "Show version")
+	flag.Parse()
 
-	// Display version information if the --version flag is provided
+	// Handle version display request
 	if *version {
 		printVersion()
 		return
 	}
 
-	// Start the application in server mode if the --server flag is provided
+	// Start server mode if requested
 	if *serverMode {
-		startServerMode(*serverPort, *dnsServer, *redisAddr, *redisPass, *redisDB, *maxWorkers)
+		startServerMode(*serverPort, *dnsServer, *redisNodes, *redisPass, *redisDB, *maxWorkers)
 		return
 	}
 
-	// Exit with an error if no email addresses are provided in CLI mode
+	// CLI mode validations
 	if *emails == "" {
 		printVersion()
-		log.Fatal("Please specify email addresses using the --emails flag")
+		log.Fatal("Please specify emails using --emails flag")
 	}
 
-	// Initialize the custom DNS resolver
+	// CLI mode execution setup
 	mx.InitResolver(*dnsServer)
-
-	// Initialize disposable email domain checker
 	if err := disposable.Init(); err != nil {
-		log.Fatalf("Failed to initialize disposable domain checker: %v", err)
+		log.Fatalf("Failed to initialize disposable checker: %v", err)
 	}
+	logger.Init(false)
 
-	// Initialize the application logger
-	logger.Init(*serverMode)
-
-	// Split the provided email addresses into a list
+	// Process emails with in-memory caching
 	emailList := strings.Split(*emails, ",")
-	logger.Log(fmt.Sprintf("Starting to process %d emails", len(emailList)))
-
-	// Process the emails and retrieve the results
 	results := checker.ProcessEmailsWithConfig(emailList, checker.Config{
-		MaxWorkers:     *maxWorkers, // Use the value from the command-line flag
+		MaxWorkers:     *maxWorkers,
 		CacheProvider:  cache.NewInMemoryCache(),
-		DomainCacheTTL: 24 * time.Hour,  // Time-to-live for domain cache
-		ExistTTL:       720 * time.Hour, // Time-to-live for existing emails
-		NotExistTTL:    24 * time.Hour,  // Time-to-live for non-existing emails
+		DomainCacheTTL: 24 * time.Hour,
+		ExistTTL:       720 * time.Hour,
+		NotExistTTL:    24 * time.Hour,
 	})
-	logger.Log(fmt.Sprintf("Processing completed. Total emails processed: %d", len(results)))
-	logger.Flush() // Ensure all logs are written to output
 
-	// Format the processing results as JSON
+	// Output results as formatted JSON
 	jsonData, _ := json.MarshalIndent(results, "", "  ")
-	fmt.Println(string(jsonData)) // Print the formatted results
-
-	// Log the final message indicating processing completion
-	logger.Log(fmt.Sprintf("Processing completed. Total emails processed: %d", len(results)))
+	fmt.Println(string(jsonData))
 }
 
-// startServerMode initializes and starts the email-checker server
-func startServerMode(port, dns, redisAddr, redisPass string, redisDB int, maxWorkers int) {
+// Configures and starts server mode with Redis integration
+func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int) {
 	logger.Init(true)
-	printVersion()
-
-	// Initialize the cache provider
+	var redisClient redis.UniversalClient
 	var cacheProvider cache.Provider
-	if redisAddr != "" {
-		cacheProvider = cache.NewRedisCache(redisAddr, redisPass, redisDB)
-	} else {
-		cacheProvider = cache.NewInMemoryCache()
-	}
-
-	// Initialize the storage backend
 	var store storage.Storage
-	var err error
-	if redisAddr != "" {
-		store, err = storage.NewRedisStorage(redisAddr, redisPass, redisDB, cacheProvider)
-		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to connect to Redis: %v", err))
-			log.Fatalf("Redis initialization failed: %v", err)
+	var isCluster bool
+
+	// Redis configuration logic
+	if redisNodes != "" {
+		nodes := strings.Split(redisNodes, ",")
+		isCluster = len(nodes) > 1
+
+		// Initialize Redis client based on cluster configuration
+		if isCluster {
+			redisClient = redis.NewClusterClient(&redis.ClusterOptions{
+				Addrs:    nodes,
+				Password: redisPass,
+			})
+		} else {
+			redisClient = redis.NewClient(&redis.Options{
+				Addr:     nodes[0],
+				Password: redisPass,
+				DB:       redisDB,
+			})
 		}
-		logger.Log(fmt.Sprintf("Using Redis storage at %s (DB %d)", redisAddr, redisDB))
+
+		// Verify Redis connection
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			log.Fatalf("Redis connection failed: %v", err)
+		}
+
+		// Configure Redis-based components
+		cacheProvider = cache.NewRedisCache(redisClient)
+		store = storage.NewRedisStorage(redisClient)
+		logger.Log(fmt.Sprintf("Using Redis storage: %v (cluster: %v)", nodes, isCluster))
 	} else {
+		// Fallback to in-memory storage
+		cacheProvider = cache.NewInMemoryCache()
 		store = storage.NewMemoryStorage(cacheProvider)
 		logger.Log("Using in-memory storage")
 	}
 
-	// Initialize DNS resolver
+	// Common service initialization
 	mx.InitResolver(dns)
+	mx.SetCacheProvider(cacheProvider)
 
-	// Initialize disposable email domain checker
 	if err := disposable.Init(); err != nil {
-		logger.Log(fmt.Sprintf("Failed to initialize disposable domain checker: %v", err))
-		log.Fatal(err)
+		log.Fatalf("Failed to initialize disposable checker: %v", err)
 	}
 
-	// Configure and start the server
-	serverMode := server.NewServer(port, store, maxWorkers)
-	logger.Log(fmt.Sprintf("Starting server on port %s | DNS: %s | Workers: %d", port, dns, maxWorkers))
+	// Create and start HTTP server
+	server := server.NewServer(
+		port,
+		store,
+		redisClient,
+		maxWorkers,
+		isCluster,
+	)
+	logger.Log(fmt.Sprintf("Starting server on port %s | DNS: %s | Workers: %d | Redis: %v",
+		port, dns, maxWorkers, redisNodes != ""))
 
-	// Handle errors during server startup
-	if err := serverMode.Start(); err != nil {
-		logger.Log(fmt.Sprintf("Failed to start server: %v", err))
-		log.Fatal(err)
+	if err := server.Start(); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }

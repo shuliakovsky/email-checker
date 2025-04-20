@@ -4,38 +4,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
 	"time"
 
-	"github.com/shuliakovsky/email-checker/internal/cache" // Cache provider interface
-	"github.com/shuliakovsky/email-checker/pkg/types"      // Defines custom types like Task
+	"github.com/go-redis/redis/v8"
+	"github.com/shuliakovsky/email-checker/internal/cache"
+	"github.com/shuliakovsky/email-checker/pkg/types"
 )
 
-// RedisStorage implements a storage mechanism backed by Redis
+// Redis key identifier for the task queue
+const (
+	TaskQueueKey = "email_checker:tasks"
+)
+
+// RedisStorage implements storage operations using Redis
 type RedisStorage struct {
-	client *redis.Client  // Redis client instance
-	cache  cache.Provider // Cache provider interface for secondary caching
+	client redis.UniversalClient
+	cache  cache.Provider
 }
 
-// NewRedisStorage initializes a RedisStorage instance with connection details
-func NewRedisStorage(addr, password string, db int, cacheProvider cache.Provider) (*RedisStorage, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     addr,     // Redis server address
-		Password: password, // Redis server password
-		DB:       db,       // Redis database number
-	})
+// Creates new RedisStorage instance with specified Redis client
+func NewRedisStorage(client redis.UniversalClient) *RedisStorage {
+	return &RedisStorage{
+		client: client,
+		cache:  cache.NewRedisCache(client),
+	}
+}
 
-	// Test connection to Redis
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second) // Set timeout for connection
-	defer cancel()
-	if _, err := client.Ping(ctx).Result(); err != nil {
-		return nil, fmt.Errorf("error connecting to Redis: %w", err) // Return error if connection fails
+// Adds task to the processing queue (LPUSH operation)
+func (r *RedisStorage) EnqueueTask(task *types.Task) error {
+	data, _ := json.Marshal(task)
+	return r.client.LPush(context.Background(), "email_checker:tasks", data).Err()
+}
+
+// Retrieves and removes task from queue using blocking pop (BRPOP)
+func (r *RedisStorage) DequeueTask() (*types.Task, error) {
+	result, err := r.client.BRPop(context.Background(), 0, "email_checker:tasks").Result()
+	if err != nil {
+		return nil, err
 	}
 
-	return &RedisStorage{
-		client: client,        // Assign Redis client instance
-		cache:  cacheProvider, // Assign cache provider instance
-	}, nil
+	var task types.Task
+	if err := json.Unmarshal([]byte(result[1]), &task); err != nil {
+		return nil, err
+	}
+	return &task, nil
 }
 
 // GetCacheProvider returns the cache provider instance
@@ -43,7 +55,7 @@ func (r *RedisStorage) GetCacheProvider() cache.Provider {
 	return r.cache
 }
 
-// SaveTask saves a task to Redis storage
+// SaveTask saves a task to Redis storage with 24-hour expiration
 func (r *RedisStorage) SaveTask(ctx context.Context, task *types.Task) error {
 	data, err := json.Marshal(task) // Serialize task into JSON format
 	if err != nil {
@@ -53,6 +65,7 @@ func (r *RedisStorage) SaveTask(ctx context.Context, task *types.Task) error {
 }
 
 // GetTask retrieves a task from Redis storage by its ID
+// Returns error if task not found or deserialization fails
 func (r *RedisStorage) GetTask(ctx context.Context, id string) (*types.Task, error) {
 	data, err := r.client.Get(ctx, "task:"+id).Bytes() // Fetch task data by key
 	if err == redis.Nil {
@@ -68,7 +81,8 @@ func (r *RedisStorage) GetTask(ctx context.Context, id string) (*types.Task, err
 	return &task, nil // Return the deserialized task
 }
 
-// UpdateTask updates an existing task in Redis storage
+// UpdateTask updates an existing task in Redis storage by overwriting it
+// Uses same storage logic as SaveTask with updated data
 func (r *RedisStorage) UpdateTask(ctx context.Context, task *types.Task) error {
 	return r.SaveTask(ctx, task) // Reuses SaveTask method to update the task
 }

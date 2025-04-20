@@ -10,61 +10,58 @@ import (
 	"github.com/shuliakovsky/email-checker/pkg/types"
 )
 
-// RedisCache is a cache provider using Redis for backend storage
+// RedisCache implements cache.Provider interface using Redis as backend
 type RedisCache struct {
-	client *redis.Client // Redis client instance used for communication with the Redis server
+	client redis.UniversalClient
 }
 
-// NewRedisCache creates and initializes a new RedisCache instance
-func NewRedisCache(addr, password string, db int) *RedisCache {
-	client := redis.NewClient(&redis.Options{
-		Addr:     addr,     // Redis server address
-		Password: password, // Authentication password for the Redis server
-		DB:       db,       // Redis database number to use
-	})
+// Creates new Redis-based cache instance with specified Redis client
+func NewRedisCache(client redis.UniversalClient) *RedisCache {
 	return &RedisCache{client: client}
 }
 
-// Get retrieves a cached value using its key. If the key does not exist or deserialization fails, it returns false.
+// Retrieves cached value by key and unmarshals it into EmailReport struct
+// Returns (value, true) on success or (nil, false) for missing/invalid entries
 func (r *RedisCache) Get(key string) (interface{}, bool) {
-	ctx := context.Background()                 // Create a context for executing the Redis operation
-	val, err := r.client.Get(ctx, key).Result() // Retrieve the value associated with the key from Redis
-	if err == redis.Nil {                       // Check if the key does not exist in Redis
+	ctx := context.Background()
+	val, err := r.client.Get(ctx, key).Result()
+	if err == redis.Nil {
 		return nil, false
 	}
 
-	// Attempt to deserialize the cached value into the EmailReport struct
 	var report types.EmailReport
-	if err := json.Unmarshal([]byte(val), &report); err != nil { // Handle deserialization errors
+	if err := json.Unmarshal([]byte(val), &report); err != nil {
 		return nil, false
 	}
-	return report, true // Return the deserialized object and a success flag
+	return report, true
 }
 
-// Set stores a value in the Redis cache with the specified key and TTL (time-to-live)
+// Stores value in Redis with JSON serialization and specified TTL expiration
+// Uses best-effort approach - errors during marshaling/insertion are ignored
 func (r *RedisCache) Set(key string, value interface{}, ttl time.Duration) {
-	ctx := context.Background()       // Create a context for executing the Redis operation
-	data, _ := json.Marshal(value)    // Serialize the value into JSON format for Redis storage
-	r.client.Set(ctx, key, data, ttl) // Store the serialized data in Redis with a time-to-live (TTL) setting
+	ctx := context.Background()
+	data, _ := json.Marshal(value)
+	r.client.Set(ctx, key, data, ttl)
 }
 
-// Flush clears all data stored in the Redis database
+// Clears all entries in Redis database using FLUSHDB command
+// Logs operation but doesn't return success/failure status
 func (r *RedisCache) Flush() {
-	ctx := context.Background()        // Create a context for executing the Redis flush operation
-	logger.Log("Flushing Redis cache") // Log a message indicating the cache is being cleared
-	r.client.FlushDB(ctx)              // Execute the Redis command to clear all entries in the database
+	ctx := context.Background()
+	logger.Log("Flushing Redis cache")
+	r.client.FlushDB(ctx)
 }
 
-// GetStats retrieves statistics about the current state of the Redis cache
+// Returns basic cache statistics (item count only)
+// Memory usage and hit/miss metrics not implemented for Redis
 func (r *RedisCache) GetStats() Stats {
-	ctx := context.Background() // Create a context for retrieving the cache statistics
+	ctx := context.Background()
 
-	size, _ := r.client.DBSize(ctx).Result() // Get the number of keys in the Redis database
-	// For Redis, precise memory usage information is not directly available without external tools
+	size, _ := r.client.DBSize(ctx).Result()
 	return Stats{
-		Items:  int(size), // The number of items stored in the Redis database
-		Memory: -1,        // Memory usage is marked as unavailable (-1)
-		Hits:   0,         // Hits tracking requires implementation via Lua scripts
-		Misses: 0,         // Misses tracking requires implementation via Lua scripts
+		Items:  int(size), // Total keys in database
+		Memory: -1,        // Memory stats require Redis MEMORY USAGE command
+		Hits:   0,         // Hit tracking needs Lua script implementation
+		Misses: 0,         // Miss tracking needs Lua script implementation
 	}
 }

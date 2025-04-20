@@ -1,107 +1,174 @@
 # email-checker
 
-Email validation tool with MX records check, SMTP verification, disposable domains detection and distributed caching
+Email validation tool with MX records check, SMTP verification, disposable domains detection and distributed caching.
 
-```html
-Key features:
-    - Email format validation
-    - MX records check with Redis caching
-    - SMTP server verification
-    - Disposable domains detection
-    - REST API mode with Swagger UI
-    - Custom DNS resolver support
-    - Horizontal scaling with Redis
-    - Configurable worker threads
-```
+## Key Features
+
+- ✅ **Multi-Stage Validation**
+    - RFC-5322 email format verification
+    - MX records validation with DNS caching
+    - SMTP server availability check
+    - Disposable email domain detection
+
+- ⚡ **Performance**
+    - Concurrent processing (configurable workers)
+    - Redis-based caching with TTL:
+        - Valid emails: 720h (30 days)
+        - Invalid emails: 24h
+        - MX records: 24h
+
+- 🌐 **Distributed Architecture**
+    - Horizontal scaling support
+    - Redis Cluster compatibility
+    - Atomic task coordination
+    - Auto-recovery for failed tasks
+
+- 📊 **Observability**
+    - Detailed JSON metrics output
+    - Cache statistics endpoint
+    - Request logging
+    - Swagger API documentation
+
 ## Operation Modes
-### CLI Mode
+
+### CLI Mode (Single Email Check)
 ```shell
 ./email-checker \
-  --emails "test@example.com,user@gmail.com" \
+  --emails "test@example.com,user@domain.com" \
   --dns 1.1.1.1 \
   --workers 15
 ```
 
-### Server Mode (API) with Redis
+### Server Mode (REST API)
 ```shell
 ./email-checker \
   --server \
   --port 8080 \
   --dns 8.8.8.8 \
-  --redis redis-host:6379 \
-  --redis-pass "secret" \
-  --redis-db 2 \
+  --redis "redis-host:6379" \
+  --redis-pass "your-password" \
   --workers 20
 ```
-## Scalability Features
- - Distributed Caching: Shared Redis cache for MX records and verification results
- - TTL Management:
- - Valid emails: 30 days cache
- - Invalid emails: 24 hours cache
- - Atomic Operations: Redis-based task coordination for cluster environments
- - Auto-retry: 3 attempts for temporary SMTP errors
-
-## API Documentation
- Swagger UI available at:
-http://localhost:8080/swagger/index.html
-
-## Build Instructions
+### Cluster Mode (Multiple Nodes)
 ```shell
-# Build for macOS (Apple Silicon)
-./build.sh darwin arm64
+# Node 1
+./email-checker \
+  --server \
+  --redis "node1:6379,node2:6379,node3:6379" \
+  --workers 15
 
-# Build for Linux
-./build.sh linux amd64
+# Node 2
+./email-checker \
+  --server \
+  --redis "node1:6379,node2:6379,node3:6379" \
+  --workers 15
+```
+### API Endpoints
+ - Method	Endpoint	Description
+ - POST	/tasks	Create email validation task
+ - GET	/tasks/{id}	Get task status
+ - GET	/tasks-results/{id}	Get paginated results
+ - POST	/cache/flush	Flush all cached data
+ - GET	/cache/status	Get cache statistics
+ - Swagger UI: http://localhost:8080/swagger/
+### Configuration Options
+#### Core Parameters
+| Flag           | Description          | Format  |
+|----------------|----------------------|---------|
+| --dns          | DNS server IP        | 1.1.1.1 |
+| --workers      | Concurrent workers   | 10      |
+| --port	        | API server port	     | 8080    |
 
-# Show build help
-./build.sh
+
+### Redis Configuration
+| Flag      | Description           | default    |
+|-----------|-----------------------|------------|
+| --redis   | Redis nodes	host:port | [,host:port] |
+| --redis-pass | Redis password        | -          |
+| --redis-db   | API server port	      | 8080       |
+
+
+## Deployment
+### Docker Example
+```docker
+version: '3.8'
+
+services:
+  email-checker:
+    image: your-registry/email-checker:latest
+    environment:
+      - REDIS_NODES=redis-node1:6379,redis-node2:6379
+      - DNS_SERVER=1.1.1.1
+      - WORKERS=20
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis-cluster
+
+  redis-cluster:
+    image: redis:7.0
+    command: redis-server --cluster-enabled yes
+    ports:
+      - "6379:6379"
 ```
 ## Systemd Service Example
 ```ini
 [Unit]
-Description=Email Checker Cluster Node
-Requires=redis.service
-After=redis.service
+Description=Email Checker Service
+After=network.target
 
 [Service]
 ExecStart=/usr/local/bin/email-checker \
   --server \
   --port 8080 \
-  --dns 1.1.1.1 \
-  --redis 127.0.0.1:6379 \
-  --workers 25
-Restart=on-failure
-SyslogIdentifier=email-checker
+  --redis "redis-cluster:6379" \
+  --workers 25 \
+  --dns 1.1.1.1
+Restart=always
+User=emailchecker
 
 [Install]
 WantedBy=multi-user.target
 ```
-## Metrics Output Example
-```json
-[
-  {
-    "email": "user@company.com",
-    "valid": true,
-    "disposable": false,
-    "exists": true,
-    "cache_hit": false,
-    "processing_time": "145ms",
-    "mx": {
-      "valid": true,
-      "records": [
-        {"host": "mx1.company.com", "priority": 10, "ttl": 300}
-      ]
-    }
-  }
-]
+## Security Recommendations
+### 1. API Protection
+```shell
+location /api/ {
+    limit_req zone=api_limit burst=10;
+    auth_basic "Restricted Area";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://email-checker:8080;
+}
 ```
-## Supported Protocols
-SMTP ports: 25, 587, 465
+### 2. Redis Security
+- Enable TLS for Redis connections
+- Use separate Redis user with limited permissions 
+- Rotate passwords regularly
+### 3. Monitoring
 
-DNS protocols: UDP/TCP
+- Track key metrics:
+- email_validation_requests_total
+- cache_hit_ratio
+- smtp_verification_time_ms
 
-HTTP API: REST with JSON
+## Build Instructions
+```shell
+# Build for Apple Silicon
+./build.sh darwin arm64
 
-### Note
-For production use, consider implementing rate limiting
-and authentication for the API endpoints
+# Build for Linux AMD64
+./build.sh linux amd64
+
+# Show build options
+./build.sh help
+```
+
+## Support Matrix
+|Component| Supported Versions |
+|---------|--------------------|
+|Redis	| 6.2+               |
+|Go	| 1.19+              |
+|SMTP	| RFC 5321           |
+|DNS	| UDP/TCP            |
+
+Report Issues: https://github.com/shuliakovsky/email-checker/issues

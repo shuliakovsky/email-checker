@@ -9,18 +9,11 @@ import (
 	"github.com/shuliakovsky/email-checker/pkg/types"      // Custom types for tasks and other entities
 )
 
-// Storage defines the interface for persistence operations related to tasks
-type Storage interface {
-	SaveTask(ctx context.Context, task *types.Task) error        // Saves a task in the storage
-	GetTask(ctx context.Context, id string) (*types.Task, error) // Retrieves a task by its unique ID
-	UpdateTask(ctx context.Context, task *types.Task) error      // Updates an existing task
-	GetCacheProvider() cache.Provider                            // Returns the cache provider instance
-}
-
 // MemoryStorage is an in-memory implementation of the Storage interface
 type MemoryStorage struct {
 	mu    sync.RWMutex           // Read-write mutex to ensure thread-safe access
 	tasks map[string]*types.Task // Map for storing tasks by their unique IDs
+	queue []*types.Task          // Task queue for local processing mode
 	cache cache.Provider         // Cache provider instance for secondary caching
 }
 
@@ -59,4 +52,26 @@ func (m *MemoryStorage) GetTask(ctx context.Context, id string) (*types.Task, er
 // UpdateTask updates an existing task in memory by overwriting it
 func (m *MemoryStorage) UpdateTask(ctx context.Context, task *types.Task) error {
 	return m.SaveTask(ctx, task) // Use SaveTask for updating logic
+}
+
+// DequeueTask removes and returns the first task from the in-memory queue
+func (m *MemoryStorage) DequeueTask() (*types.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.queue) == 0 {
+		return nil, fmt.Errorf("no tasks in queue")
+	}
+
+	task := m.queue[0]
+	m.queue = m.queue[1:]
+	return task, nil
+}
+
+// EnqueueTask adds a task to the end of the in-memory queue
+func (m *MemoryStorage) EnqueueTask(task *types.Task) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queue = append(m.queue, task)
+	return nil
 }

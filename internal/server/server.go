@@ -4,117 +4,246 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	httpSwagger "github.com/swaggo/http-swagger"
 	"net/http"
 	"strconv"
 	"time"
 
-	_ "github.com/shuliakovsky/email-checker/docs"           // Auto-generated Swagger documentation
-	"github.com/shuliakovsky/email-checker/internal/checker" // Email processing logic
-	"github.com/shuliakovsky/email-checker/internal/logger"  // Custom logger
-	"github.com/shuliakovsky/email-checker/internal/storage" // Task and results storage
-	"github.com/shuliakovsky/email-checker/pkg/types"        // Custom types like Task and EmailReport
+	"github.com/go-redis/redis/v8"
+	_ "github.com/shuliakovsky/email-checker/docs"
+	"github.com/shuliakovsky/email-checker/internal/checker"
+	"github.com/shuliakovsky/email-checker/internal/lock"
+	"github.com/shuliakovsky/email-checker/internal/logger"
+	"github.com/shuliakovsky/email-checker/internal/storage"
+	"github.com/shuliakovsky/email-checker/pkg/types"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-// Server is the main HTTP server for handling tasks and results
-type Server struct {
-	storage    storage.Storage // Handles task persistence and caching
-	port       string          // Port to run the server
-	maxWorkers int             // Maximum number of workers for concurrent processing
-}
-
-// TaskStatusResponse represents the response for task status queries
+// Represents task status information for API responses
 type TaskStatusResponse struct {
-	Status       string    `json:"status"`                // Current task status (e.g., "pending", "completed")
-	TotalResults int       `json:"total_results"`         // Total number of processed results
-	CreatedAt    time.Time `json:"created_at"`            // Timestamp when the task was created
-	TotalPages   int       `json:"total_pages,omitempty"` // Optional: Total pages of results
+	Status       string    `json:"status"`
+	TotalResults int       `json:"total_results"`
+	CreatedAt    time.Time `json:"created_at"`
+	TotalPages   int       `json:"total_pages,omitempty"`
 }
 
-// NewServer initializes a new Server instance
-func NewServer(port string, storage storage.Storage, maxWorkers int) *Server {
+// Core server structure holding dependencies and configuration
+type Server struct {
+	storage     storage.Storage
+	redisClient redis.UniversalClient
+	port        string
+	maxWorkers  int
+	clusterMode bool
+}
+
+// Creates a new Server instance with specified configuration
+func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool) *Server {
 	return &Server{
-		storage:    storage,    // Assign provided storage
-		port:       port,       // Assign provided port
-		maxWorkers: maxWorkers, // Assign max workers
+		storage:     store,
+		redisClient: redisClient,
+		port:        port,
+		maxWorkers:  maxWorkers,
+		clusterMode: clusterMode,
 	}
 }
 
-// generateID generates a unique task ID using the current timestamp
-func (s *Server) generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano()) // Use nanoseconds for uniqueness
+// Processes tasks in local mode using in-memory queue
+func (s *Server) localWorker() {
+	for {
+		task, err := s.storage.DequeueTask()
+		if err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		s.processTask(task)
+	}
 }
 
-// Start begins the HTTP server and registers route handlers
+// Starts the HTTP server and task processing infrastructure
 func (s *Server) Start() error {
-	router := http.NewServeMux()                              // Create a new HTTP request multiplexer
-	router.HandleFunc("/cache/flush", s.handleFlushCache)     // Route to flush cache
-	router.HandleFunc("/cache/status", s.handleCacheStatus)   // Route to get cache status
-	router.HandleFunc("/tasks", s.handleTasks)                // Route to create tasks
-	router.HandleFunc("/tasks/", s.handleTaskStatus)          // Route to check task status
-	router.HandleFunc("/tasks-results/", s.handleTaskResults) // Route to fetch task results
-	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)   // Route for Swagger documentation
-	loggedRouter := loggingMiddleware(router)                 // Wrap routes with logging middleware
-	return http.ListenAndServe(":"+s.port, loggedRouter)      // Start the server on the specified port
+	if s.clusterMode {
+		s.startClusterTaskProcessor()
+		s.startStalledTasksRecovery()
+	} else {
+		s.startLocalTaskProcessor()
+	}
+
+	router := http.NewServeMux()
+	router.HandleFunc("/cache/flush", s.handleFlushCache)
+	router.HandleFunc("/cache/status", s.handleCacheStatus)
+	router.HandleFunc("/tasks", s.handleTasks)
+	router.HandleFunc("/tasks/", s.handleTaskStatus)
+	router.HandleFunc("/tasks-results/", s.handleTaskResults)
+	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+	loggedRouter := loggingMiddleware(router)
+	return http.ListenAndServe(":"+s.port, loggedRouter)
 }
 
-// handleTasks processes task creation requests
+// Lua script for atomic task dequeue with lock acquisition
+const dequeueScript = `
+local task_data = redis.call('RPOP', KEYS[1])
+if not task_data then return nil end
+local task = cjson.decode(task_data)
+local lock_key = 'lock:task:' .. task.id
+if redis.call('SET', lock_key, ARGV[1], 'NX', 'EX', ARGV[2]) then
+	return task_data
+else
+	redis.call('LPUSH', KEYS[1], task_data)
+	return nil
+end`
+
+// Starts cluster-aware task processing workers
+func (s *Server) startClusterTaskProcessor() {
+	for i := 0; i < s.maxWorkers; i++ {
+		go func() {
+			for {
+				task, err := s.dequeueTaskWithLock()
+				if err != nil {
+					time.Sleep(1 * time.Second)
+					continue
+				}
+				s.processClusterTask(task)
+			}
+		}()
+	}
+}
+
+// Atomically dequeues task with Redis lock acquisition
+func (s *Server) dequeueTaskWithLock() (*types.Task, error) {
+	result, err := s.redisClient.Eval(
+		context.Background(),
+		dequeueScript,
+		[]string{storage.TaskQueueKey},
+		fmt.Sprintf("worker:%d", time.Now().UnixNano()),
+		300,
+	).Result()
+
+	if err != nil || result == nil {
+		return nil, fmt.Errorf("no tasks available")
+	}
+
+	var task types.Task
+	if err := json.Unmarshal([]byte(result.(string)), &task); err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// Periodically recovers stalled tasks with expired locks
+func (s *Server) startStalledTasksRecovery() {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for range ticker.C {
+			script := `
+				local locks = redis.call('KEYS', 'lock:task:*')
+				for _, lock_key in ipairs(locks) do
+					local ttl = redis.call('TTL', lock_key)
+					if ttl == -1 or ttl < 60 then
+						local task_id = string.sub(lock_key, 11)
+						redis.call('LPUSH', KEYS[1], task_id)
+						redis.call('DEL', lock_key)
+					end
+				end
+			`
+			s.redisClient.Eval(context.Background(), script, []string{storage.TaskQueueKey})
+		}
+	}()
+}
+
+// Processes task in cluster mode with distributed locking
+func (s *Server) processClusterTask(task *types.Task) {
+	lockKey := fmt.Sprintf("lock:task:%s", task.ID)
+	lock := lock.NewLock(s.redisClient, lockKey, 5*time.Minute, s.clusterMode)
+
+	if !lock.Acquire(context.Background()) {
+		return
+	}
+
+	refreshCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	lock.StartRefresh(refreshCtx)
+	defer lock.Release(context.Background())
+
+	task.Status = "processing"
+	s.storage.UpdateTask(context.Background(), task)
+
+	cfg := checker.Config{
+		MaxWorkers:     s.maxWorkers,
+		CacheProvider:  s.storage.GetCacheProvider(),
+		DomainCacheTTL: 24 * time.Hour,
+		ExistTTL:       720 * time.Hour,
+		NotExistTTL:    24 * time.Hour,
+	}
+
+	results := checker.ProcessEmailsWithConfig(task.Emails, cfg)
+	task.Status = "completed"
+	task.Results = results
+
+	s.storage.UpdateTask(context.Background(), task)
+}
+
+// Generates unique task ID using nanosecond timestamp
+func (s *Server) generateID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// Initializes local task processing workers
+func (s *Server) startLocalTaskProcessor() {
+	for i := 0; i < s.maxWorkers; i++ {
+		go s.localWorker()
+	}
+}
+
+// Handles task creation requests
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var request struct {
-			Emails []string `json:"emails"` // List of emails to process
+			Emails []string `json:"emails"`
 		}
 
-		// Parse JSON request body
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
 
-		// Create a new task with a unique ID
 		taskID := s.generateID()
 		task := &types.Task{
 			ID:        taskID,
-			Status:    "pending", // Initial status
+			Status:    "pending",
 			Emails:    request.Emails,
 			CreatedAt: time.Now(),
 		}
 
-		// Save the task to storage
 		if err := s.storage.SaveTask(r.Context(), task); err != nil {
 			http.Error(w, "Failed to save task", http.StatusInternalServerError)
 			return
 		}
 
-		// Process the task asynchronously
 		go s.processTask(task)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"task_id": taskID}) // Respond with the task ID
+		json.NewEncoder(w).Encode(map[string]string{"task_id": taskID})
 		return
 	}
 
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Reject non-POST methods
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
-// handleTaskStatus handles requests to retrieve the status of a task
+// Provides task status information
 func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
-	taskID := r.URL.Path[len("/tasks/"):] // Extract task ID from URL
+	taskID := r.URL.Path[len("/tasks/"):]
 
-	// Fetch task details from storage
 	task, err := s.storage.GetTask(r.Context(), taskID)
 	if err != nil {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
 
-	// Calculate total pages of results
 	var totalPages int
 	if task.Status == "completed" {
-		totalPages = (len(task.Results) + 99) / 100 // Round up for pages
+		totalPages = (len(task.Results) + 99) / 100
 	}
 
-	// Build the response
 	response := TaskStatusResponse{
 		Status:       task.Status,
 		TotalResults: len(task.Results),
@@ -123,16 +252,15 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response) // Send response as JSON
+	json.NewEncoder(w).Encode(response)
 }
 
-// handleTaskResults handles requests to fetch paginated results of a task
+// Serves paginated task results
 func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
-	taskID := r.URL.Path[len("/tasks-results/"):]             // Extract task ID from URL
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))        // Parse page number from query
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page")) // Parse per-page count from query
+	taskID := r.URL.Path[len("/tasks-results/"):]
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 
-	// Default values if not provided
 	if perPage <= 0 {
 		perPage = 100
 	}
@@ -140,14 +268,12 @@ func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	// Fetch task details from storage
 	task, err := s.storage.GetTask(r.Context(), taskID)
 	if err != nil {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
 
-	// Calculate pagination boundaries
 	start := (page - 1) * perPage
 	if start < 0 || start >= len(task.Results) {
 		start = 0
@@ -157,11 +283,10 @@ func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
 		end = len(task.Results)
 	}
 
-	// Build the response
 	response := struct {
-		Data  []types.EmailReport `json:"data"`  // Paginated email reports
-		Page  int                 `json:"page"`  // Current page number
-		Total int                 `json:"total"` // Total number of results
+		Data  []types.EmailReport `json:"data"`
+		Page  int                 `json:"page"`
+		Total int                 `json:"total"`
 	}{
 		Data:  task.Results[start:end],
 		Page:  page,
@@ -169,60 +294,57 @@ func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response) // Send response as JSON
+	json.NewEncoder(w).Encode(response)
 }
 
-// processTask processes an email task and updates its status
+// Executes email validation task and updates state
 func (s *Server) processTask(task *types.Task) {
 	ctx := context.Background()
-	task.Status = "processing"          // Update status to "processing"
-	_ = s.storage.UpdateTask(ctx, task) // Save the updated task status
+	task.Status = "processing"
+	_ = s.storage.UpdateTask(ctx, task)
 
-	// Configure the checker with storage-provided cache
 	cfg := checker.Config{
 		MaxWorkers:     s.maxWorkers,
 		CacheProvider:  s.storage.GetCacheProvider(),
 		DomainCacheTTL: 24 * time.Hour,
-		ExistTTL:       30 * 24 * time.Hour, // Cache existing emails for 30 days
-		NotExistTTL:    24 * time.Hour,      // Cache non-existing emails for 24 hours
+		ExistTTL:       30 * 24 * time.Hour,
+		NotExistTTL:    24 * time.Hour,
 	}
 
-	// Process emails and store results
 	results := checker.ProcessEmailsWithConfig(task.Emails, cfg)
-	task.Status = "completed" // Update status to "completed"
+	task.Status = "completed"
 	task.Results = results
-	_ = s.storage.UpdateTask(ctx, task) // Save completed task
+	_ = s.storage.UpdateTask(ctx, task)
 }
 
-// handleFlushCache clears the server-side cache
+// Handles cache flush operations
 func (s *Server) handleFlushCache(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Reject if the HTTP method is not POST
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	s.storage.GetCacheProvider().Flush()          // Clear all cached data using the storage cache provider
-	w.WriteHeader(http.StatusOK)                  // Respond with a 200 OK status
-	w.Write([]byte("Cache successfully flushed")) // Inform the client that the cache was cleared successfully
+	s.storage.GetCacheProvider().Flush()
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Cache successfully flushed"))
 }
 
-// handleCacheStatus retrieves and sends cache statistics
+// Provides cache system statistics
 func (s *Server) handleCacheStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Reject if the HTTP method is not GET
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	stats := s.storage.GetCacheProvider().GetStats() // Fetch statistics from the cache provider
-
+	stats := s.storage.GetCacheProvider().GetStats()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats) // Respond with cache statistics in JSON format
+	json.NewEncoder(w).Encode(stats)
 }
 
-// loggingMiddleware adds logging functionality for incoming HTTP requests
+// Adds request logging to HTTP handlers
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Log(fmt.Sprintf("%s %s", r.Method, r.URL.Path)) // Log the HTTP method and request path
-		next.ServeHTTP(w, r)                                   // Forward the request to the next handler
+		logger.Log(fmt.Sprintf("%s %s", r.Method, r.URL.Path))
+		next.ServeHTTP(w, r)
 	})
 }
