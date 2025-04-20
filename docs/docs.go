@@ -1,8 +1,8 @@
 package docs
 
 import (
-	"embed" // Provides support for embedding files into the binary
-	"log"   // Logging utilities
+	"embed"
+	"log"
 
 	"github.com/swaggo/swag" // Swagger package for API documentation
 )

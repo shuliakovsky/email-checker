@@ -1,69 +1,74 @@
 package mx
 
 import (
-	"context" // Defines the Context type
-	"fmt"     // Formatted output
-	"net"     // Provides network-related utilities
-	"sync"    // Synchronization primitives
-	"time"    // For handling time durations and delays
+	"context"
+	"fmt"
+	"net"
+	"sync"
+	"time"
 )
 
 var (
+	// Cache structure for storing MX records with read-write mutex for thread-safe operations
 	cache struct {
-		sync.RWMutex                      // Read-write mutex for concurrency
-		records      map[string][]*net.MX // Cache for MX records
+		sync.RWMutex                      // Mutex for ensuring thread safety during cache access
+		records      map[string][]*net.MX // Map to store MX records by domain
 	}
-	resolver *net.Resolver // Custom DNS resolver
+	resolver *net.Resolver // Custom DNS resolver for handling MX record lookups
 )
 
 func init() {
-	cache.records = make(map[string][]*net.MX) // Initialize cache
+	// Initialize the cache for storing MX records
+	cache.records = make(map[string][]*net.MX)
 }
 
-// InitResolver Initialise a custom DNS resolver
+// InitResolver configures and initializes a custom DNS resolver
 func InitResolver(dnsServer string) {
-	// Create a new resolver instance with custom settings.
+	// Create a resolver instance with custom dialing functionality
 	resolver = &net.Resolver{
-		PreferGo: true, // Prefer the Go implementation of DNS resolution instead of the system one !!!
+		PreferGo: true, // Prefer using Go's DNS resolution over the system's implementation
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			// Configure a dialer with a timeout of 2 seconds for making connections.
+			// Configure a dialer with a timeout for establishing connections
 			d := net.Dialer{
 				Timeout: 2 * time.Second,
 			}
 
-			// List of protocols to attempt for the connection: UDP and TCP.
-			protocols := []string{"udp", "tcp"} // Loop through the protocols (UDP and TCP).
+			// Attempt to connect using both UDP and TCP protocols
+			protocols := []string{"udp", "tcp"}
 			for _, proto := range protocols {
-				conn, err := d.DialContext(ctx, proto, net.JoinHostPort(dnsServer, "53"))
+				conn, err := d.DialContext(ctx, proto, net.JoinHostPort(dnsServer, "53")) // Connect to port 53 (DNS)
 				if err == nil {
-					return conn, nil
+					return conn, nil // Return the connection if successful
 				}
 			}
-			return nil, fmt.Errorf("failed to connect via UDP and TCP") // If both UDP and TCP connections fail, return an error.
+
+			// Return an error if neither UDP nor TCP connections succeed
+			return nil, fmt.Errorf("failed to connect via UDP and TCP")
 		},
 	}
 }
 
+// GetMXRecords retrieves MX records for the given domain
 func GetMXRecords(domain string) ([]*net.MX, error) {
-	cache.RLock()                       // Acquire read lock
-	cached, ok := cache.records[domain] // Check if domain is in cache
-	cache.RUnlock()                     // Release read lock
+	// Check the cache for existing MX records
+	cache.RLock()                       // Acquire read lock for safe cache access
+	cached, ok := cache.records[domain] // Look up the domain in the cache
+	cache.RUnlock()                     // Release the read lock
 
 	if ok {
-		return cached, nil // Return cached records
+		return cached, nil // Return cached MX records if available
 	}
 
-	records, err := resolver.LookupMX(context.Background(), domain) // Perform MX lookup
+	// Perform MX record lookup using the custom DNS resolver
+	records, err := resolver.LookupMX(context.Background(), domain)
 	if err != nil {
-		return nil, err
-	}
-	if err != nil {
-		return nil, err // Return error if lookup fails
+		return nil, err // Return an error if the lookup fails
 	}
 
-	cache.Lock()                    // Acquire write lock
-	cache.records[domain] = records // Store records in cache
-	cache.Unlock()                  // Release write lock
+	// Store the retrieved MX records in the cache
+	cache.Lock()                    // Acquire write lock for updating the cache
+	cache.records[domain] = records // Save the MX records under the domain key
+	cache.Unlock()                  // Release the write lock
 
-	return records, nil // Return retrieved records
+	return records, nil // Return the retrieved MX records
 }

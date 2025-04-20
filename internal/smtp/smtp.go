@@ -1,64 +1,69 @@
 package smtp
 
 import (
-	"crypto/tls"                                            // Enables secure TLS connections
-	"fmt"                                                   // Provides formatted input and output functions
-	"github.com/shuliakovsky/email-checker/internal/logger" // Logging utility
-	"net"                                                   // Includes networking capabilities
-	"net/smtp"                                              // Provides SMTP client functionality
-	"strings"                                               // Offers string manipulation utilities
-	"time"                                                  // For handling time durations and delays
+	"crypto/tls"
+	"fmt"
+	"net"
+	"net/smtp"
+	"strings"
+	"time"
+
+	"github.com/shuliakovsky/email-checker/internal/logger" // Logging utility for activity tracking
 )
 
 const (
-	connectTimeout = 3 * time.Second // Timeout duration for establishing a connection
-	commandTimeout = 8 * time.Second // Timeout duration for executing SMTP commands
-	maxRetries     = 2               // Maximum number of retries for a failed attempt
-	retryDelay     = 1 * time.Second // Delay duration between retries
-	heloDomain     = "example.com"   // Domain name used in HELO/EHLO commands
+	connectTimeout = 3 * time.Second // Timeout for establishing SMTP connections
+	commandTimeout = 8 * time.Second // Timeout for executing SMTP commands
+	maxRetries     = 2               // Maximum number of retry attempts for failed connections
+	retryDelay     = 1 * time.Second // Delay between consecutive retries
+	heloDomain     = "example.com"   // Domain used during the HELO/EHLO SMTP greeting
 )
 
-// Checks the existence of an email address by interacting with the SMTP servers specified in MX records
+// CheckEmailExists validates an email address by interacting with its domain's SMTP servers
 func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, bool, int) {
 	ports := []string{"25", "587", "465"} // Common SMTP ports (unsecured and secured)
 	var (
-		maxTTL        int    // Stores maximum TTL value from temporary errors
-		finalErr      string // Last error received during processing
-		finalCategory string // Category of the last error
-		hasPermanent  bool   // Flag indicating if a permanent error occurred
-		permanentErr  string // Stores the permanent error message
-		permanentCat  string // Stores the category of the permanent error
+		maxTTL        int    // Maximum TTL value from temporary SMTP errors
+		finalErr      string // Last error encountered during SMTP interactions
+		finalCategory string // Classification of the last error
+		hasPermanent  bool   // Flag indicating permanent SMTP error
+		permanentErr  string // Error message for permanent SMTP failure
+		permanentCat  string // Category of the permanent SMTP failure
 	)
 
+	// Iterate over all MX records and SMTP ports for validation
 	for _, mx := range mxRecords {
-		mxHost := strings.TrimSuffix(mx.Host, ".") // Removes trailing dot from MX host
+		mxHost := strings.TrimSuffix(mx.Host, ".") // Remove trailing dot from MX host
 		for _, port := range ports {
-			logger.Log(fmt.Sprintf("Trying %s:%s for %s", mxHost, port, email)) // Logs the connection attempt
+			logger.Log(fmt.Sprintf("Trying %s:%s for %s", mxHost, port, email)) // Log attempt details
 
-			// Performs email validation with retry mechanism
+			// Attempt validation with retry logic
 			exists, err, retry := attemptWithRetry(email, mxHost, port)
 			if retry {
-				logger.Log(fmt.Sprintf("Retrying %s:%s", mxHost, port)) // Logs retry attempt
-				time.Sleep(retryDelay)                                  // Waits before retrying
+				logger.Log(fmt.Sprintf("Retrying %s:%s", mxHost, port)) // Log retry attempt
+				time.Sleep(retryDelay)                                  // Pause before retrying
 				exists, err, _ = attemptWithRetry(email, mxHost, port)
 			}
 
-			if exists { // If the email exists, return success
+			if exists { // Email address verified successfully
 				return true, "", "", false, 0
 			}
 
-			if err != "" { // Processes errors returned during validation
-				category, permanent, ttl := classifySMTPError(err)                      // Classify the error
-				logger.Log(fmt.Sprintf("SMTP error: %s (category: %s)", err, category)) // Logs the error
+			// Process errors returned during validation
+			if err != "" {
+				category, permanent, ttl := classifySMTPError(err)                      // Classify SMTP error
+				logger.Log(fmt.Sprintf("SMTP error: %s (category: %s)", err, category)) // Log error details
 
-				if permanent { // If the error is permanent, break the loop
+				// If permanent error, halt further processing
+				if permanent {
 					hasPermanent = true
 					permanentErr = err
 					permanentCat = category
 					break
 				}
 
-				if ttl > maxTTL { // Stores the highest TTL value among temporary errors
+				// Track temporary errors with higher TTL
+				if ttl > maxTTL {
 					maxTTL = ttl
 					finalErr = err
 					finalCategory = category
@@ -66,49 +71,50 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 			}
 		}
 
-		if hasPermanent { // If a permanent error has been detected, stop processing
+		if hasPermanent { // Break loop if permanent error detected
 			break
 		}
 	}
 
-	if hasPermanent { // Returns results for permanent errors
+	// Return results based on the encountered errors
+	if hasPermanent {
 		return false, permanentErr, permanentCat, true, 0
 	}
-	if finalErr != "" { // Returns results for temporary errors
+	if finalErr != "" {
 		return false, finalErr, finalCategory, false, maxTTL
 	}
-	return false, "", "", false, 0 // Default return if no valid results are obtained
+	return false, "", "", false, 0 // Default case when no valid results are obtained
 }
 
-// Classifies SMTP errors based on the error code and categorizes them as permanent or temporary
+// classifySMTPError categorizes SMTP errors as permanent or temporary
 func classifySMTPError(errMsg string) (string, bool, int) {
-	code := extractSMTPCode(errMsg) // Extracts SMTP error code from the message
+	code := extractSMTPCode(errMsg) // Extract SMTP error code from message
 	switch {
-	case strings.HasPrefix(code, "5"): // Permanent error codes start with '5'
+	case strings.HasPrefix(code, "5"): // Permanent errors start with '5'
 		return handlePermanentErrors(code)
-	case strings.HasPrefix(code, "4"): // Temporary error codes start with '4'
+	case strings.HasPrefix(code, "4"): // Temporary errors start with '4'
 		return handleTemporaryErrors(code)
-	default: // Unknown error codes are treated as permanent errors
+	default: // Unknown error codes treated as permanent errors
 		return "unknown_error", true, 0
 	}
 }
 
-// Extracts SMTP error code from the error message for classification
+// extractSMTPCode extracts the SMTP error code for classification purposes
 func extractSMTPCode(errMsg string) string {
-	parts := strings.SplitN(errMsg, " ", 3) // Splits error message to isolate the code
+	parts := strings.SplitN(errMsg, " ", 3) // Split error message for code isolation
 	if len(parts) > 0 && len(parts[0]) >= 3 {
 		code := parts[0]
 		if code[0] == '4' || code[0] == '5' {
-			return strings.SplitN(code, ".", 2)[0] // Extracts the primary error code
+			return strings.SplitN(code, ".", 2)[0] // Extract primary error code
 		}
 	}
 	return ""
 }
 
-// Handles permanent SMTP errors and assigns specific categories based on the error code
+// handlePermanentErrors maps SMTP permanent error codes to categories
 func handlePermanentErrors(code string) (string, bool, int) {
 	switch code {
-	case "550", "551": // Error codes for mailbox not found
+	case "550", "551": // Error codes indicating mailbox not found
 		return "mailbox_not_found", true, 0
 	case "552": // Error code for mailbox full
 		return "mailbox_full", true, 0
@@ -116,14 +122,14 @@ func handlePermanentErrors(code string) (string, bool, int) {
 		return "invalid_address", true, 0
 	case "554": // Error code for transaction failure
 		return "transaction_failed", true, 0
-	default: // General permanent error
+	default: // Generic permanent error category
 		return "permanent_error", true, 0
 	}
 }
 
-// Handles temporary SMTP errors and assigns specific categories based on the error code
+// handleTemporaryErrors maps SMTP temporary error codes to categories and TTL values
 func handleTemporaryErrors(code string) (string, bool, int) {
-	ttl := calculateTTL(code) // Calculates the retry wait time (TTL)
+	ttl := calculateTTL(code) // Compute retry TTL based on error code
 	switch code {
 	case "421", "450": // Error codes for server unavailable
 		return "server_unavailable", false, ttl
@@ -131,54 +137,54 @@ func handleTemporaryErrors(code string) (string, bool, int) {
 		return "server_error", false, ttl
 	case "452": // Error code for storage limit exceeded
 		return "storage_limit", false, ttl
-	default: // General temporary error
+	default: // Generic temporary error category
 		return "temporary_error", false, ttl
 	}
 }
 
-// Calculates TTL values for specific temporary error codes
+// calculateTTL computes retry TTL values for specific temporary error codes
 func calculateTTL(code string) int {
 	switch code {
-	case "421": // Retry in 30 minutes
+	case "421": // Retry after 30 minutes
 		return 1800
-	case "450": // Retry in 1 hour
+	case "450": // Retry after 1 hour
 		return 3600
-	case "451": // Retry in 2 hours
+	case "451": // Retry after 2 hours
 		return 7200
-	case "452": // Retry in 4 hours
+	case "452": // Retry after 4 hours
 		return 14400
-	default: // Default retry time of 1 hour
+	default: // Default retry interval of 1 hour
 		return 3600
 	}
 }
 
-// Attempts email validation with multiple retries if necessary
+// attemptWithRetry executes email validation attempts with a retry mechanism
 func attemptWithRetry(email, host, port string) (bool, string, bool) {
 	for i := 0; i < maxRetries; i++ {
-		exists, err, retry := attempt(email, host, port) // Performs email validation
+		exists, err, retry := attempt(email, host, port) // Perform validation attempt
 		if !retry {
-			return exists, err, false // Stops retries if retry flag is false
+			return exists, err, false // Stop retries if retry flag is false
 		}
-		time.Sleep(retryDelay) // Waits before retrying
+		time.Sleep(retryDelay) // Pause before retrying
 	}
-	return false, "max retries exceeded", false // Returns default result after max retries
+	return false, "max retries exceeded", false // Default result after max retries
 }
 
-// Performs a single email validation attempt by interacting with the SMTP server
+// attempt performs a single email validation attempt against the SMTP server
 func attempt(email, host, port string) (bool, string, bool) {
-	conn, err := connect(host, port) // Establishes a connection
+	conn, err := connect(host, port) // Establish SMTP connection
 	if err != nil {
-		return false, err.Error(), shouldRetry(err) // Handles connection error
+		return false, err.Error(), shouldRetry(err) // Handle connection error
 	}
 	defer conn.Close()
 
-	client, err := smtp.NewClient(conn, host) // Creates an SMTP client
+	client, err := smtp.NewClient(conn, host) // Create SMTP client instance
 	if err != nil {
-		return false, err.Error(), shouldRetry(err) // Handles client error
+		return false, err.Error(), shouldRetry(err) // Handle client error
 	}
 	defer client.Close()
 
-	// Handles STARTTLS for secure SMTP communication
+	// Handle STARTTLS for secure communication
 	if port == "587" {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(&tls.Config{ServerName: host}); err != nil {
@@ -187,39 +193,39 @@ func attempt(email, host, port string) (bool, string, bool) {
 		}
 	}
 
-	// Executes HELO/EHLO command
+	// Execute HELO/EHLO command
 	if err := client.Hello(heloDomain); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	// Executes MAIL FROM command
+	// Execute MAIL FROM command
 	if err := client.Mail("test@" + heloDomain); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	// Executes RCPT TO command
+	// Execute RCPT TO command for the email address
 	if err := client.Rcpt(email); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	return true, "", false // Email exists successfully
+	return true, "", false // Successfully verified email address
 }
 
-// Establishes connection to SMTP server with specific settings for secure/non-secure communication
+// connect establishes an SMTP connection using secure or non-secure protocols
 func connect(host, port string) (net.Conn, error) {
-	if port == "465" { // Handles secure connection using TLS
+	if port == "465" { // Establish secure connection using TLS
 		return tls.DialWithDialer(
-			&net.Dialer{Timeout: connectTimeout}, // Applies timeout for connection
+			&net.Dialer{Timeout: connectTimeout}, // Apply connection timeout
 			"tcp",
-			net.JoinHostPort(host, port),  // Joins host and port
-			&tls.Config{ServerName: host}, // Specifies server name for TLS
+			net.JoinHostPort(host, port),  // Combine host and port for connection
+			&tls.Config{ServerName: host}, // Configure server name for TLS
 		)
 	}
-	return net.DialTimeout("tcp", net.JoinHostPort(host, port), connectTimeout) // Handles non-secure connection
+	return net.DialTimeout("tcp", net.JoinHostPort(host, port), connectTimeout) // Non-secure connection
 }
 
-// Determines whether the error suggests retrying based on its type
+// shouldRetry determines if an error warrants retrying the operation
 func shouldRetry(err error) bool {
-	return strings.Contains(err.Error(), "timeout") || // Retry if timeout occurred
-		strings.Contains(err.Error(), "connection refused")
+	return strings.Contains(err.Error(), "timeout") || // Retry on timeout
+		strings.Contains(err.Error(), "connection refused") // Retry if connection refused
 }
