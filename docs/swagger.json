@@ -1,27 +1,65 @@
 {
-  "schemes": ["http"],
   "swagger": "2.0",
   "info": {
     "description": "API for email verification service",
     "title": "Email Checker API",
-    "contact": {},
-    "version": "1.0"
+    "version": "1.0",
+    "contact": {}
   },
   "host": "localhost:8080",
   "basePath": "/",
+  "schemes": ["http"],
   "paths": {
+    "/cache/status": {
+      "get": {
+        "summary": "Get cache status",
+        "description": "Get cache statistics",
+        "tags": ["cache"],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Cache statistics",
+            "schema": {
+              "$ref": "#/definitions/CacheStatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/cache/flush": {
+      "post": {
+        "summary": "Clear cache",
+        "description": "Flush all cached data",
+        "tags": ["cache"],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Success message",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "example": "Cache successfully flushed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tasks": {
       "post": {
+        "summary": "Create new verification task",
         "description": "Create task for email verification",
+        "tags": ["tasks"],
         "consumes": ["application/json"],
         "produces": ["application/json"],
-        "tags": ["tasks"],
-        "summary": "Create new verification task",
         "parameters": [
           {
-            "description": "Email list",
             "name": "request",
             "in": "body",
+            "description": "Email list",
             "required": true,
             "schema": {
               "$ref": "#/definitions/Request"
@@ -43,17 +81,17 @@
     },
     "/tasks/{task_id}": {
       "get": {
-        "description": "Get verification task status and results",
-        "produces": ["application/json"],
-        "tags": ["tasks"],
         "summary": "Get task status",
+        "description": "Get verification task status and results",
+        "tags": ["tasks"],
+        "produces": ["application/json"],
         "parameters": [
           {
-            "type": "string",
-            "description": "Task ID",
             "name": "task_id",
             "in": "path",
-            "required": true
+            "type": "string",
+            "required": true,
+            "description": "Task ID"
           }
         ],
         "responses": {
@@ -71,34 +109,34 @@
     },
     "/tasks-results/{task_id}": {
       "get": {
-        "description": "Get paginated results for completed task",
-        "produces": ["application/json"],
-        "tags": ["tasks"],
         "summary": "Get paginated results",
+        "description": "Get paginated results for completed task",
+        "tags": ["tasks"],
+        "produces": ["application/json"],
         "parameters": [
           {
-            "type": "string",
-            "description": "Task ID",
             "name": "task_id",
             "in": "path",
-            "required": true
+            "type": "string",
+            "required": true,
+            "description": "Task ID"
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number",
             "type": "integer",
             "default": 1,
-            "minimum": 1
+            "minimum": 1,
+            "description": "Page number"
           },
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page",
             "type": "integer",
             "default": 100,
             "minimum": 1,
-            "maximum": 1000
+            "maximum": 100,
+            "description": "Items per page"
           }
         ],
         "responses": {
@@ -116,9 +154,9 @@
     },
     "/swagger/": {
       "get": {
-        "produces": ["text/html"],
-        "tags": ["documentation"],
         "summary": "Get Swagger UI",
+        "tags": ["documentation"],
+        "produces": ["text/html"],
         "responses": {
           "200": {
             "description": "OK"
@@ -128,6 +166,31 @@
     }
   },
   "definitions": {
+    "CacheStatusResponse": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "integer",
+          "example": 1425,
+          "description": "Total cached items"
+        },
+        "memory": {
+          "type": "string",
+          "example": "12.34 MB",
+          "description": "Memory usage"
+        },
+        "hits": {
+          "type": "integer",
+          "example": 24500,
+          "description": "Cache hit count"
+        },
+        "misses": {
+          "type": "integer",
+          "example": 1780,
+          "description": "Cache miss count"
+        }
+      }
+    },
     "Request": {
       "type": "object",
       "properties": {
@@ -176,7 +239,7 @@
         "data": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/types.EmailReport"
+            "$ref": "#/definitions/EmailReport"
           }
         },
         "page": {
@@ -193,7 +256,7 @@
         }
       }
     },
-    "types.EmailReport": {
+    "EmailReport": {
       "type": "object",
       "properties": {
         "email": {
@@ -213,7 +276,7 @@
           "example": true
         },
         "mx": {
-          "$ref": "#/definitions/types.MXStats"
+          "$ref": "#/definitions/MXStats"
         },
         "permanent_error": {
           "type": "boolean",
@@ -233,7 +296,7 @@
         }
       }
     },
-    "types.MXStats": {
+    "MXStats": {
       "type": "object",
       "properties": {
         "valid": {
@@ -243,7 +306,7 @@
         "records": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/types.MXRecord"
+            "$ref": "#/definitions/MXRecord"
           }
         },
         "error": {
@@ -252,7 +315,7 @@
         }
       }
     },
-    "types.MXRecord": {
+    "MXRecord": {
       "type": "object",
       "properties": {
         "host": {

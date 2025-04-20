@@ -48,6 +48,8 @@ func (s *Server) generateID() string {
 // Start begins the HTTP server and registers route handlers
 func (s *Server) Start() error {
 	router := http.NewServeMux()                              // Create a new HTTP request multiplexer
+	router.HandleFunc("/cache/flush", s.handleFlushCache)     // Route to flush cache
+	router.HandleFunc("/cache/status", s.handleCacheStatus)   // Route to get cache status
 	router.HandleFunc("/tasks", s.handleTasks)                // Route to create tasks
 	router.HandleFunc("/tasks/", s.handleTaskStatus)          // Route to check task status
 	router.HandleFunc("/tasks-results/", s.handleTaskResults) // Route to fetch task results
@@ -194,14 +196,33 @@ func (s *Server) processTask(task *types.Task) {
 
 // handleFlushCache clears the server-side cache
 func (s *Server) handleFlushCache(w http.ResponseWriter, r *http.Request) {
-	s.storage.GetCacheProvider().Flush() // Clear the cache
-	w.WriteHeader(http.StatusOK)         // Respond with a success status
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Reject if the HTTP method is not POST
+		return
+	}
+
+	s.storage.GetCacheProvider().Flush()          // Clear all cached data using the storage cache provider
+	w.WriteHeader(http.StatusOK)                  // Respond with a 200 OK status
+	w.Write([]byte("Cache successfully flushed")) // Inform the client that the cache was cleared successfully
 }
 
-// loggingMiddleware adds logging for incoming HTTP requests
+// handleCacheStatus retrieves and sends cache statistics
+func (s *Server) handleCacheStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Reject if the HTTP method is not GET
+		return
+	}
+
+	stats := s.storage.GetCacheProvider().GetStats() // Fetch statistics from the cache provider
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats) // Respond with cache statistics in JSON format
+}
+
+// loggingMiddleware adds logging functionality for incoming HTTP requests
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Log(fmt.Sprintf("%s %s", r.Method, r.URL.Path)) // Log the method and path
-		next.ServeHTTP(w, r)                                   // Call the next handler
+		logger.Log(fmt.Sprintf("%s %s", r.Method, r.URL.Path)) // Log the HTTP method and request path
+		next.ServeHTTP(w, r)                                   // Forward the request to the next handler
 	})
 }

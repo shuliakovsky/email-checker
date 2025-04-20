@@ -58,7 +58,7 @@ fi
 
 # Build the application
 echo "Building for $OS ($ARCH)..."
- GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM go build -ldflags "-X main.Version=$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.1') -X main.CommitHash=$(git rev-parse --short HEAD)" -o $OUTPUT_NAME ./cmd/email-checker
+ CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM go build -ldflags "-X main.Version=$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.1') -X main.CommitHash=$(git rev-parse --short HEAD)" -o $OUTPUT_NAME ./cmd/email-checker
 
 if [ $? -eq 0 ]; then
     echo "Build successful: $OUTPUT_NAME"
