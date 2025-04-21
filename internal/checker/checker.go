@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -158,7 +159,24 @@ func processEmail(email string, cfg Config) types.EmailReport {
 
 // isValidEmail checks if an email address has a valid format
 func isValidEmail(email string) bool {
-	return strings.Contains(email, "@") && len(strings.Split(email, "@")) == 2
+	const pattern = `(?i)^(?:[a-z0-9!#$%&'*+/=?^_{|}~-]+` +
+		`(?:\.[a-z0-9!#$%&'*+/=?^_{|}~-]+)*` +
+		`|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\
+\[\x01-\x09\x0b\x0c\x0e-\x7f])*")` +
+		`@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+` +
+		`[a-z]{2,}|
+\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}` +
+		`(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\]
+|IPv6:[\da-f:]+\]
+)$`
+
+	// Check the overall length (RFC 3696)
+	if len(email) > 254 {
+		return false
+	}
+
+	re := regexp.MustCompile(pattern)
+	return re.MatchString(email)
 }
 
 // collectResults gathers results from the results channel into a slice

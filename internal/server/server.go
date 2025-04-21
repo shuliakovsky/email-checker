@@ -205,6 +205,18 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
+		// limit emails length with 10 000
+		if len(request.Emails) > 10000 {
+			http.Error(w, "Too many emails (max 10000)", http.StatusBadRequest)
+			return
+		}
+		// base check for email length
+		for _, email := range request.Emails {
+			if len(email) > 254 {
+				http.Error(w, "Email too long", http.StatusBadRequest)
+				return
+			}
+		}
 
 		taskID := s.generateID()
 		task := &types.Task{

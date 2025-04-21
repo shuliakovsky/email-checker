@@ -197,10 +197,14 @@
         "emails": {
           "type": "array",
           "items": {
-            "type": "string"
-          }
+            "type": "string",
+            "maxLength": 254
+          },
+          "maxItems": 10000,
+          "description": "Array of email addresses (maximum 10,000). Each email address must not exceed 254 characters."
         }
-      }
+      },
+      "description": "Request object containing a list of email addresses to verify."
     },
     "TaskIDResponse": {
       "type": "object",

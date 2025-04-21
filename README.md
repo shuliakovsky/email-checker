@@ -70,7 +70,7 @@ Email validation tool with MX records check, SMTP verification, disposable domai
  - GET	/tasks-results/{id}	Get paginated results
  - POST	/cache/flush	Flush all cached data
  - GET	/cache/status	Get cache statistics
- - Swagger UI: http://localhost:8080/swagger/
+ - Swagger UI: [/swagger/](https://shuliakovsky.github.io/email-checker/)
 ### Configuration Options
 #### Core Parameters
 | Flag           | Description          | Format  |
