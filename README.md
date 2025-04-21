@@ -73,32 +73,39 @@ Email validation tool with MX records check, SMTP verification, disposable domai
  - Swagger UI: [/swagger/](https://shuliakovsky.github.io/email-checker/)
 ### Configuration Options
 #### Core Parameters
-| Flag           | Description          | Format  |
-|----------------|----------------------|---------|
-| --dns          | DNS server IP        | 1.1.1.1 |
-| --workers      | Concurrent workers   | 10      |
-| --port	        | API server port	     | 8080    |
+| Flag          | Environment variable | Description        | Format  |
+|---------------|----------------------|--------------------|---------|
+| --dns         | DNS                  | DNS server IP      | 1.1.1.1     |
+| --workers     | WORKERS              | Concurrent workers | 10            |
+| --port	       | PORT                 | API server port	   | 8080               |
 
 
 ### Redis Configuration
-| Flag      | Description           | default    |
-|-----------|-----------------------|------------|
-| --redis   | Redis nodes	host:port | [,host:port] |
-| --redis-pass | Redis password        | -          |
-| --redis-db   | API server port	      | 8080       |
+| Flag      | Environment variable | Description          | default    |
+|-----------|----------------------|----------------------|------------|
+| --redis   | REDIS                | Redis nodes	host:port | [,host:port] |
+| --redis-pass | REDIS_PASS           | Redis password       | -                     |
+| --redis-db   | REDIS_DB             |API server port	      | 8080                 |
 
-
+### Yaml configuration example
+```yaml
+#  /etc/email-checker/config.yaml
+dns: 8.8.8.8
+workers: 20
+redis: "redis1:6379,redis2:6379"
+redis-pass: "secret"
+```
 ## Deployment
 ### Docker Example
-```docker
+```yaml
 version: '3.8'
 
 services:
   email-checker:
     image: your-registry/email-checker:latest
     environment:
-      - REDIS_NODES=redis-node1:6379,redis-node2:6379
-      - DNS_SERVER=1.1.1.1
+      - REDIS=redis-node1:6379,redis-node2:6379
+      - DNS=1.1.1.1
       - WORKERS=20
     ports:
       - "8080:8080"
