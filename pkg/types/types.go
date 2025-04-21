@@ -31,9 +31,19 @@ type EmailReport struct {
 
 // Task represents a batch email validation task
 type Task struct {
-	ID        string        `json:"id"`         // Unique identifier for the task
-	Status    string        `json:"status"`     // Current status of the task (e.g., "pending", "processing", "completed")
-	Emails    []string      `json:"emails"`     // List of email addresses to be validated in the task
-	Results   []EmailReport `json:"results"`    // List of validation results for the processed emails
-	CreatedAt time.Time     `json:"created_at"` // Timestamp indicating when the task was created
+	ID        string         `json:"id"`                // Unique identifier for the task
+	Status    string         `json:"status"`            // Current status of the task (e.g., "pending", "processing", "completed")
+	Emails    []string       `json:"emails"`            // List of email addresses to be validated in the task
+	Results   []EmailReport  `json:"results"`           // List of validation results for the processed emails
+	CreatedAt time.Time      `json:"created_at"`        // Timestamp indicating when the task was created
+	Webhook   *WebhookConfig `json:"webhook,omitempty"` // Webhook configuration
+}
+
+// WebhookConfig contains the parameters for task status notifications
+type WebhookConfig struct {
+	URL     string        `json:"url"`     // URL for sending notifications
+	TTL     time.Duration `json:"-"`       // Excluded from JSON, used internally within the application
+	TTLStr  string        `json:"ttl"`     // Accepts a string from JSON (e.g., "1h")
+	Retries int           `json:"retries"` // Maximum number of retry attempts
+	Secret  string        `json:"secret"`  // Secret for signing requests (optional)
 }

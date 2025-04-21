@@ -35,4 +35,19 @@ var (
 		Name: "mx_cache_misses_total",
 		Help: "MX records cache misses",
 	})
+	WebhookAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "webhook_attempts_total",
+		Help: "Total webhook delivery attempts",
+	}, []string{"task_id", "status"})
+
+	WebhookRetries = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "webhook_retries_total",
+		Help: "Total webhook retry attempts",
+	})
+
+	WebhookLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "webhook_latency_seconds",
+		Help:    "Webhook delivery latency distribution",
+		Buckets: prometheus.DefBuckets,
+	})
 )

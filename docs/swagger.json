@@ -152,6 +152,39 @@
         }
       }
     },
+    "/tasks-with-webhook": {
+      "post": {
+        "summary": "Create verification task with webhook",
+        "description": "Create task for email verification with callback webhook notification",
+        "tags": ["tasks"],
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/WebhookRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/TaskIDResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request format or parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
     "/swagger/": {
       "get": {
         "summary": "Get Swagger UI",
@@ -353,12 +386,77 @@
         }
       }
     },
-    "PrometheusMetrics": {
+    "WebhookRequest": {
       "type": "object",
       "properties": {
-        "metrics": {
+        "emails": {
+          "$ref": "#/definitions/Request/properties/emails"
+        },
+        "webhook": {
+          "$ref": "#/definitions/WebhookConfig"
+        }
+      },
+      "required": ["emails", "webhook"]
+    },
+    "WebhookConfig": {
+      "type": "object",
+      "properties": {
+        "url": {
           "type": "string",
-          "description": "Plain text metrics in Prometheus exposition format"
+          "format": "uri",
+          "example": "https://api.example.com/webhook",
+          "description": "Webhook URL for status notifications"
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "example": "1h",
+          "description": "Webhook TTL (e.g., 30s, 5m, 1h)"
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "example": 3,
+          "description": "Max retry attempts for failed notifications"
+        },
+        "secret": {
+          "type": "string",
+          "example": "my-secret-key",
+          "description": "HMAC signature secret (optional)"
+        }
+      },
+      "required": ["url", "ttl", "retries"]
+    },
+    "WebhookResponse": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "example": "1745264294247024000"
+        },
+        "status": {
+          "type": "string",
+          "example": "completed"
+        },
+        "results": {
+          "type": "integer",
+          "example": 1
+        },
+        "attempts": {
+          "type": "integer",
+          "example": 0,
+          "description": "Number of delivery attempts made"
+        },
+        "ttl": {
+          "type": "string",
+          "example": "1h",
+          "description": "Original webhook TTL"
+        },
+        "lifetime": {
+          "type": "string",
+          "example": "2.299709ms",
+          "description": "Total task processing time"
         }
       }
     }

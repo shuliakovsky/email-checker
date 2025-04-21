@@ -19,29 +19,6 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-// Represents task status information for API responses
-type TaskStatusResponse struct {
-	Status       string    `json:"status"`
-	TotalResults int       `json:"total_results"`
-	CreatedAt    time.Time `json:"created_at"`
-	TotalPages   int       `json:"total_pages,omitempty"`
-}
-
-// Core server structure holding dependencies and configuration
-type Server struct {
-	storage     storage.Storage
-	redisClient redis.UniversalClient
-	port        string
-	maxWorkers  int
-	clusterMode bool
-}
-
-// response writer
-type loggingResponseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
 // Creates a new Server instance with specified configuration
 func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool) *Server {
 	return &Server{
@@ -81,6 +58,7 @@ func (s *Server) Start() error {
 	router.HandleFunc("/tasks", s.handleTasks)
 	router.HandleFunc("/tasks/", s.handleTaskStatus)
 	router.HandleFunc("/tasks-results/", s.handleTaskResults)
+	router.HandleFunc("/tasks-with-webhook", s.handleTasksWithWebhook)
 	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 	loggedRouter := loggingMiddleware(router)
 	return http.ListenAndServe(":"+s.port, loggedRouter)
@@ -335,6 +313,9 @@ func (s *Server) processTask(task *types.Task) {
 	task.Status = "completed"
 	task.Results = results
 	_ = s.storage.UpdateTask(ctx, task)
+	if task.Webhook != nil {
+		s.triggerWebhook(task)
+	}
 }
 
 // Handles cache flush operations
@@ -361,6 +342,15 @@ func (s *Server) handleCacheStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{w, http.StatusOK}
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
 // Adds request logging to HTTP handlers
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -374,13 +364,4 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			statusCode,
 		).Inc()
 	})
-}
-
-func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
-	return &loggingResponseWriter{w, http.StatusOK}
-}
-
-func (lrw *loggingResponseWriter) WriteHeader(code int) {
-	lrw.statusCode = code
-	lrw.ResponseWriter.WriteHeader(code)
 }
