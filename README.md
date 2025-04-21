@@ -66,6 +66,7 @@ Email validation tool with MX records check, SMTP verification, disposable domai
 ### API Endpoints
  - Method	Endpoint	Description
  - POST	/tasks	Create email validation task
+ - POST	/tasks-with-webhook	Create an email validation task with a webhook to receive
  - GET	/tasks/{id}	Get task status
  - GET	/tasks-results/{id}	Get paginated results
  - POST	/cache/flush	Flush all cached data
