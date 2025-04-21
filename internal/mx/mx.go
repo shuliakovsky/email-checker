@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shuliakovsky/email-checker/internal/cache"
+	"github.com/shuliakovsky/email-checker/internal/metrics"
 )
 
 // Package mx provides DNS MX record lookup with caching capabilities
@@ -62,8 +63,10 @@ func GetMXRecords(domain string) ([]*net.MX, error) {
 	// First check distributed cache if available
 	if cacheProvider != nil {
 		if cached, ok := cacheProvider.Get("mx:" + domain); ok {
+			metrics.MXCacheHits.Inc()
 			return cached.([]*net.MX), nil
 		}
+		metrics.MXCacheMisses.Inc()
 	}
 
 	// Then check local in-memory cache

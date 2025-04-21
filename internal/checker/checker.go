@@ -11,6 +11,7 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/cache"      // Handles cache operations
 	"github.com/shuliakovsky/email-checker/internal/disposable" // Checks disposable email domains
 	"github.com/shuliakovsky/email-checker/internal/logger"     // Provides logging capabilities
+	"github.com/shuliakovsky/email-checker/internal/metrics"    // Prometheus metrics
 	"github.com/shuliakovsky/email-checker/internal/mx"         // Retrieves MX records
 	"github.com/shuliakovsky/email-checker/internal/smtp"       // Handles SMTP checks
 	"github.com/shuliakovsky/email-checker/pkg/types"           // Defines custom types, like EmailReport
@@ -60,7 +61,6 @@ func ProcessEmailsWithConfig(emails []string, cfg Config) []types.EmailReport {
 		wg.Wait()
 		close(results)
 	}()
-
 	return collectResults(results)
 }
 
@@ -87,6 +87,8 @@ func worker(jobs <-chan string, results chan<- types.EmailReport, wg *sync.WaitG
 
 		// Process the email and generate a report
 		report := processEmail(normalizedEmail, cfg)
+		// Process metrics
+		metrics.EmailsChecked.Inc()
 		results <- report
 
 		// Cache the result with an appropriate TTL

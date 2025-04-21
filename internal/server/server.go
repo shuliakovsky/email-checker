@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/shuliakovsky/email-checker/docs"
 	"github.com/shuliakovsky/email-checker/internal/checker"
 	"github.com/shuliakovsky/email-checker/internal/lock"
-	"github.com/shuliakovsky/email-checker/internal/logger"
+	"github.com/shuliakovsky/email-checker/internal/metrics"
 	"github.com/shuliakovsky/email-checker/internal/storage"
 	"github.com/shuliakovsky/email-checker/pkg/types"
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -33,6 +34,12 @@ type Server struct {
 	port        string
 	maxWorkers  int
 	clusterMode bool
+}
+
+// response writer
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
 }
 
 // Creates a new Server instance with specified configuration
@@ -69,6 +76,7 @@ func (s *Server) Start() error {
 
 	router := http.NewServeMux()
 	router.HandleFunc("/cache/flush", s.handleFlushCache)
+	router.Handle("/metrics", promhttp.Handler())
 	router.HandleFunc("/cache/status", s.handleCacheStatus)
 	router.HandleFunc("/tasks", s.handleTasks)
 	router.HandleFunc("/tasks/", s.handleTaskStatus)
@@ -356,7 +364,23 @@ func (s *Server) handleCacheStatus(w http.ResponseWriter, r *http.Request) {
 // Adds request logging to HTTP handlers
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Log(fmt.Sprintf("%s %s", r.Method, r.URL.Path))
-		next.ServeHTTP(w, r)
+		lrw := newLoggingResponseWriter(w)
+		next.ServeHTTP(lrw, r)
+
+		statusCode := strconv.Itoa(lrw.statusCode)
+		metrics.HttpRequests.WithLabelValues(
+			r.Method,
+			r.URL.Path,
+			statusCode,
+		).Inc()
 	})
+}
+
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{w, http.StatusOK}
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }

@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/shuliakovsky/email-checker/internal/logger"
+	"github.com/shuliakovsky/email-checker/internal/metrics"
 )
 
 // Provider defines the interface for a cache provider
@@ -54,10 +55,12 @@ func (c *InMemoryCache) Get(key string) (interface{}, bool) {
 
 	item, ok := c.items[key]
 	if !ok || time.Now().After(item.expireAt) {
+		metrics.CacheMisses.Inc()
 		atomic.AddInt64(&c.statsMisses, 1) // Increment the miss counter
 		return nil, false
 	}
 
+	metrics.CacheHits.Inc()
 	atomic.AddInt64(&c.statsHits, 1) // Increment the hit counter
 	return item.value, true
 }
