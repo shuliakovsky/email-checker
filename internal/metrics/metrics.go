@@ -64,4 +64,9 @@ var (
 		Name: "smtp_temporary_errors_total",
 		Help: "Total temporary SMTP errors",
 	}, []string{"domain"})
+
+	RBLRestrictions = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "smtp_rbl_restrictions_total",
+		Help: "Total RBL restriction errors",
+	})
 )

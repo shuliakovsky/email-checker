@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shuliakovsky/email-checker/internal/domains"  // Domains rotation
 	"github.com/shuliakovsky/email-checker/internal/logger"   // Logging utility for activity tracking
 	"github.com/shuliakovsky/email-checker/internal/metrics"  // Metrics functionality
 	"github.com/shuliakovsky/email-checker/internal/throttle" // Throttling functionality
@@ -18,7 +19,6 @@ const (
 	commandTimeout = 8 * time.Second // Timeout for executing SMTP commands
 	maxRetries     = 2               // Maximum number of retry attempts for failed connections
 	retryDelay     = 1 * time.Second // Delay between consecutive retries
-	heloDomain     = "example.com"   // Domain used during the HELO/EHLO SMTP greeting
 )
 
 var (
@@ -73,6 +73,18 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 				category, permanent, ttl := classifySMTPError(err)                      // Classify SMTP error
 				logger.Log(fmt.Sprintf("SMTP error: %s (category: %s)", err, category)) // Log error details
 
+				// Специальная обработка RBL ошибки
+				if category == "rbl_restriction" {
+					if throttleManager != nil {
+						// Блокируем домен на 1 минуту
+						throttleManager.ThrottleDomainWithTTL(domain, 1*time.Minute)
+						logger.Log(fmt.Sprintf("[RBL] Domain %s throttled for 1 minute", domain))
+						metrics.RBLRestrictions.Inc()
+					}
+					// Немедленно прерываем проверку
+					return false, "rbl restriction", category, false, 60
+				}
+
 				// Counting temp errors
 				if !permanent {
 					tempErrors++
@@ -125,6 +137,12 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 // classifySMTPError categorizes SMTP errors as permanent or temporary
 func classifySMTPError(errMsg string) (string, bool, int) {
 	code := extractSMTPCode(errMsg) // Extract SMTP error code from message
+
+	// Define RBL error by code 5.7.1
+	if code == "5.7.1" && strings.Contains(errMsg, "RBL Restriction") {
+		return "rbl_restriction", false, 60 // Temporary error TTL 60 sec
+	}
+
 	switch {
 	case strings.HasPrefix(code, "5"): // Permanent errors start with '5'
 		return handlePermanentErrors(code)
@@ -208,19 +226,23 @@ func attemptWithRetry(email, host, port string) (bool, string, bool) {
 
 // attempt performs a single email validation attempt against the SMTP server
 func attempt(email, host, port string) (bool, string, bool) {
-	conn, err := connect(host, port) // Establish SMTP connection
+	heloDomain, err := domains.GetNext()
 	if err != nil {
-		return false, err.Error(), shouldRetry(err) // Handle connection error
+		return false, fmt.Sprintf("failed to get HELO domain: %v", err), false
+	}
+
+	conn, err := connect(host, port)
+	if err != nil {
+		return false, err.Error(), shouldRetry(err)
 	}
 	defer conn.Close()
 
-	client, err := smtp.NewClient(conn, host) // Create SMTP client instance
+	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return false, err.Error(), shouldRetry(err) // Handle client error
+		return false, err.Error(), shouldRetry(err)
 	}
 	defer client.Close()
 
-	// Handle STARTTLS for secure communication
 	if port == "587" {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(&tls.Config{ServerName: host}); err != nil {
@@ -229,22 +251,19 @@ func attempt(email, host, port string) (bool, string, bool) {
 		}
 	}
 
-	// Execute HELO/EHLO command
 	if err := client.Hello(heloDomain); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	// Execute MAIL FROM command
 	if err := client.Mail("test@" + heloDomain); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	// Execute RCPT TO command for the email address
 	if err := client.Rcpt(email); err != nil {
 		return false, err.Error(), shouldRetry(err)
 	}
 
-	return true, "", false // Successfully verified email address
+	return true, "", false
 }
 
 // connect establishes an SMTP connection using secure or non-secure protocols

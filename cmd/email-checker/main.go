@@ -13,6 +13,7 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/cache"
 	"github.com/shuliakovsky/email-checker/internal/checker"
 	"github.com/shuliakovsky/email-checker/internal/disposable"
+	"github.com/shuliakovsky/email-checker/internal/domains"
 	"github.com/shuliakovsky/email-checker/internal/logger"
 	"github.com/shuliakovsky/email-checker/internal/mx"
 	"github.com/shuliakovsky/email-checker/internal/server"
@@ -178,6 +179,7 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 	}
 
 	// Common service initialization DNS resolver and Cache provider
+	domains.Init(isCluster, redisClient)
 	mx.InitResolver(dns)
 	mx.SetCacheProvider(cacheProvider)
 
