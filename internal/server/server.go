@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/shuliakovsky/email-checker/docs"
 	"github.com/shuliakovsky/email-checker/internal/checker"
@@ -170,7 +171,7 @@ func (s *Server) processClusterTask(task *types.Task) {
 
 // Generates unique task ID using nanosecond timestamp
 func (s *Server) generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return fmt.Sprintf("%s-%d", uuid.New().String(), time.Now().UnixNano())
 }
 
 // Initializes local task processing workers
