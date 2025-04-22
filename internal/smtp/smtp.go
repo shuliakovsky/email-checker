@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shuliakovsky/email-checker/internal/logger" // Logging utility for activity tracking
+	"github.com/shuliakovsky/email-checker/internal/logger"   // Logging utility for activity tracking
+	"github.com/shuliakovsky/email-checker/internal/metrics"  // Metrics functionality
+	"github.com/shuliakovsky/email-checker/internal/throttle" // Throttling functionality
 )
 
 const (
@@ -18,6 +20,14 @@ const (
 	retryDelay     = 1 * time.Second // Delay between consecutive retries
 	heloDomain     = "example.com"   // Domain used during the HELO/EHLO SMTP greeting
 )
+
+var (
+	throttleManager *throttle.ThrottleManager
+)
+
+func SetThrottleManager(tm *throttle.ThrottleManager) {
+	throttleManager = tm
+}
 
 // CheckEmailExists validates an email address by interacting with its domain's SMTP servers
 func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, bool, int) {
@@ -29,11 +39,20 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 		hasPermanent  bool   // Flag indicating permanent SMTP error
 		permanentErr  string // Error message for permanent SMTP failure
 		permanentCat  string // Category of the permanent SMTP failure
+		tempErrors    int    // Category for temporary errors
 	)
+
+	domain := strings.Split(email, "@")[1]
+
+	// Checks for domain throttling
+	if throttleManager != nil && throttleManager.IsThrottled(domain) {
+		logger.Log(fmt.Sprintf("[Throttle] Domain %s is throttled, skipping checks", domain))
+		return false, "domain throttled", "throttled", false, 0
+	}
 
 	// Iterate over all MX records and SMTP ports for validation
 	for _, mx := range mxRecords {
-		mxHost := strings.TrimSuffix(mx.Host, ".") // Remove trailing dot from MX host
+		mxHost := strings.TrimSuffix(mx.Host, ".")
 		for _, port := range ports {
 			logger.Log(fmt.Sprintf("Trying %s:%s for %s", mxHost, port, email)) // Log attempt details
 
@@ -53,6 +72,12 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 			if err != "" {
 				category, permanent, ttl := classifySMTPError(err)                      // Classify SMTP error
 				logger.Log(fmt.Sprintf("SMTP error: %s (category: %s)", err, category)) // Log error details
+
+				// Counting temp errors
+				if !permanent {
+					tempErrors++
+					metrics.TemporaryErrors.WithLabelValues(domain).Inc()
+				}
 
 				// If permanent error, halt further processing
 				if permanent {
@@ -74,6 +99,17 @@ func CheckEmailExists(email string, mxRecords []*net.MX) (bool, string, string, 
 		if hasPermanent { // Break loop if permanent error detected
 			break
 		}
+	}
+
+	// Handling temp errors over all MX
+	if tempErrors > 0 && tempErrors == len(mxRecords)*len(ports) {
+		if throttleManager != nil {
+			metrics.ThrottledDomains.Inc()
+			logger.Log(fmt.Sprintf("[Throttle] All MX failed for %s, throttling", domain))
+			throttleManager.ThrottleDomain(domain)
+			throttleManager.ScheduleRetry(email, 1)
+		}
+		return false, "all MX temporary errors", "temporary", false, maxTTL
 	}
 
 	// Return results based on the encountered errors

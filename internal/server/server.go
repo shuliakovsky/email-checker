@@ -16,18 +16,20 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/lock"
 	"github.com/shuliakovsky/email-checker/internal/metrics"
 	"github.com/shuliakovsky/email-checker/internal/storage"
+	"github.com/shuliakovsky/email-checker/internal/throttle"
 	"github.com/shuliakovsky/email-checker/pkg/types"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // Creates a new Server instance with specified configuration
-func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool) *Server {
+func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool, throttleManager *throttle.ThrottleManager) *Server {
 	return &Server{
-		storage:     store,
-		redisClient: redisClient,
-		port:        port,
-		maxWorkers:  maxWorkers,
-		clusterMode: clusterMode,
+		storage:         store,
+		redisClient:     redisClient,
+		port:            port,
+		maxWorkers:      maxWorkers,
+		clusterMode:     clusterMode,
+		throttleManager: throttleManager,
 	}
 }
 

@@ -50,4 +50,18 @@ var (
 		Help:    "Webhook delivery latency distribution",
 		Buckets: prometheus.DefBuckets,
 	})
+	ThrottledDomains = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "smtp_throttled_domains_total",
+		Help: "Total number of throttled domains",
+	})
+
+	RetryAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "smtp_retry_attempts_total",
+		Help: "Total email retry attempts",
+	}, []string{"email", "attempt"})
+
+	TemporaryErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "smtp_temporary_errors_total",
+		Help: "Total temporary SMTP errors",
+	}, []string{"domain"})
 )

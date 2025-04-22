@@ -16,7 +16,9 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/logger"
 	"github.com/shuliakovsky/email-checker/internal/mx"
 	"github.com/shuliakovsky/email-checker/internal/server"
+	"github.com/shuliakovsky/email-checker/internal/smtp"
 	"github.com/shuliakovsky/email-checker/internal/storage"
+	"github.com/shuliakovsky/email-checker/internal/throttle"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -74,6 +76,16 @@ func initViper() {
 func main() {
 	initViper() // Initialize configuration
 
+	// Base config initialising
+	cfg := struct {
+		CacheProvider cache.Provider
+	}{
+		CacheProvider: cache.NewInMemoryCache(),
+	}
+
+	throttleManager := throttle.NewThrottleManager(cfg.CacheProvider)
+	smtp.SetThrottleManager(throttleManager)
+
 	// Handle version display request
 	if viper.GetBool("version") {
 		printVersion()
@@ -89,6 +101,7 @@ func main() {
 			viper.GetString("redis-pass"),
 			viper.GetInt("redis-db"),
 			viper.GetInt("workers"),
+			throttleManager,
 		)
 		return
 	}
@@ -122,7 +135,7 @@ func main() {
 }
 
 // Configures and starts server mode with Redis integration (if presents)
-func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int) {
+func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int, throttleManager *throttle.ThrottleManager) {
 	logger.Init(true) // should be the very first command
 	var redisClient redis.UniversalClient
 	var cacheProvider cache.Provider
@@ -180,6 +193,7 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 		redisClient,
 		maxWorkers,
 		isCluster,
+		throttleManager,
 	)
 	logger.Log(fmt.Sprintf("Starting server on port %s | DNS: %s | Workers: %d | Redis: %v",
 		port, dns, maxWorkers, redisNodes != ""))

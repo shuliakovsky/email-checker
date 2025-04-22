@@ -14,16 +14,18 @@ import (
 	"github.com/shuliakovsky/email-checker/internal/metrics"    // Prometheus metrics
 	"github.com/shuliakovsky/email-checker/internal/mx"         // Retrieves MX records
 	"github.com/shuliakovsky/email-checker/internal/smtp"       // Handles SMTP checks
+	"github.com/shuliakovsky/email-checker/internal/throttle"   // ThrottleManager functionalities
 	"github.com/shuliakovsky/email-checker/pkg/types"           // Defines custom types, like EmailReport
 )
 
 // Config holds the configuration settings for email processing
 type Config struct {
-	MaxWorkers     int            // Maximum number of concurrent workers
-	CacheProvider  cache.Provider // Cache implementation to store processed data
-	DomainCacheTTL time.Duration  // TTL for domain-related cache entries
-	ExistTTL       time.Duration  // TTL for existing emails (e.g., 30 days)
-	NotExistTTL    time.Duration  // TTL for non-existing emails (e.g., 24 hours)
+	MaxWorkers      int                       // Maximum number of concurrent workers
+	CacheProvider   cache.Provider            // Cache implementation to store processed data
+	DomainCacheTTL  time.Duration             // TTL for domain-related cache entries
+	ExistTTL        time.Duration             // TTL for existing emails (e.g., 30 days)
+	NotExistTTL     time.Duration             // TTL for non-existing emails (e.g., 24 hours)
+	ThrottleManager *throttle.ThrottleManager // ThrottleManager implementation
 }
 
 // DefaultConfig provides default settings for email processing
