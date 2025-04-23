@@ -8,6 +8,8 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+var domainsList []string
+
 // Counter interface for sequence generation
 type Counter interface {
 	Next() (uint64, error)
@@ -35,23 +37,13 @@ func (c *RedisCounter) Next() (uint64, error) {
 }
 
 var (
-	// Predefined list of HELO domains for rotation
-	domainsList = []string{
-		"rover.info",
-		"mailto.plus",
-		"fexpost.com",
-		"chitthi.in",
-		"fextemp.com",
-		"any.pink",
-		"merepost.com",
-	}
-
 	// Active counter implementation (memory or Redis)
 	counter Counter
 )
 
 // Initialize counter based on deployment mode
-func Init(isClusterMode bool, redisClient redis.UniversalClient) {
+func Init(isClusterMode bool, redisClient redis.UniversalClient, heloDomains []string) {
+	domainsList = heloDomains
 	if isClusterMode && redisClient != nil {
 		// Use Redis counter for clustered deployments
 		counter = &RedisCounter{

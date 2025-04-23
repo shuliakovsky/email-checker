@@ -49,6 +49,8 @@ func initViper() {
 	pflag.String("port", "8080", "Server port")
 	pflag.Bool("server", false, "Run in server mode")
 	pflag.Bool("version", false, "Show version")
+	pflag.StringSlice("helo-domains", nil, "[REQUIRED] List of HELO domains for SMTP rotation (comma-separated)")
+	viper.BindPFlag("helo-domains", pflag.Lookup("helo-domains"))
 	pflag.Parse()
 
 	// Bind flags to Viper settings
@@ -103,6 +105,7 @@ func main() {
 			viper.GetInt("redis-db"),
 			viper.GetInt("workers"),
 			throttleManager,
+			viper.GetStringSlice("helo-domains"),
 		)
 		return
 	}
@@ -111,6 +114,10 @@ func main() {
 	if viper.GetString("emails") == "" {
 		printVersion()
 		log.Fatal("Please specify emails using --emails flag or EMAILS env")
+	}
+	if viper.GetString("helo-domains") == "" {
+		printVersion()
+		log.Fatal("HELO domains list is required. Use --helo-domains flag or config file")
 	}
 
 	// CLI mode execution setup
@@ -136,12 +143,17 @@ func main() {
 }
 
 // Configures and starts server mode with Redis integration (if presents)
-func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int, throttleManager *throttle.ThrottleManager) {
+func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int, throttleManager *throttle.ThrottleManager, heloDomains []string) {
 	logger.Init(true) // should be the very first command
 	var redisClient redis.UniversalClient
 	var cacheProvider cache.Provider
 	var store storage.Storage
 	var isCluster bool
+
+	if len(heloDomains) == 0 {
+		logger.Log("[FATAL] HELO domains list is empty")
+		log.Fatal("HELO domains required for server mode")
+	}
 
 	// Redis configuration logic
 	if redisNodes != "" {
@@ -179,7 +191,7 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 	}
 
 	// Common service initialization DNS resolver and Cache provider
-	domains.Init(isCluster, redisClient)
+	domains.Init(isCluster, redisClient, heloDomains)
 	mx.InitResolver(dns)
 	mx.SetCacheProvider(cacheProvider)
 

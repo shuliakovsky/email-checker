@@ -74,19 +74,20 @@ Email validation tool with MX records check, SMTP verification, disposable domai
  - Swagger UI: [/swagger/](https://shuliakovsky.github.io/email-checker/)
 ### Configuration Options
 #### Core Parameters
-| Flag          | Environment variable | Description        | Format  |
-|---------------|----------------------|--------------------|---------|
-| --dns         | DNS                  | DNS server IP      | 1.1.1.1     |
-| --workers     | WORKERS              | Concurrent workers | 10            |
-| --port	       | PORT                 | API server port	   | 8080               |
+| Flag            | Environment variable | Description               | Format                           |
+|-----------------|----------------------|---------------------------|----------------------------------|
+| --dns           | DNS                  | DNS server IP             | 1.1.1.1                          |
+| --workers       | WORKERS              | Concurrent workers        | 10                               |
+| --port	         | PORT                 | API server port	          | 8080                             |
+| --helo-domains  | HELO_DOMAINS         | List of the helo-domains	 | "my-domain.com,..,my-domain.net" |
 
 
 ### Redis Configuration
-| Flag      | Environment variable | Description          | default    |
-|-----------|----------------------|----------------------|------------|
-| --redis   | REDIS                | Redis nodes	host:port | [,host:port] |
-| --redis-pass | REDIS_PASS           | Redis password       | -                     |
-| --redis-db   | REDIS_DB             |API server port	      | 8080                 |
+| Flag         | Environment variable | Description           | default         |
+|--------------|----------------------|-----------------------|-----------------|
+| --redis      | REDIS                | Redis nodes	host:port | [,host:port]    |
+| --redis-pass | REDIS_PASS           | Redis password        | -               |
+| --redis-db   | REDIS_DB             | API server port	      | 8080            |
 
 ### Yaml configuration example
 ```yaml
@@ -95,6 +96,9 @@ dns: 8.8.8.8
 workers: 20
 redis: "redis1:6379,redis2:6379"
 redis-pass: "secret"
+helo-domains:
+  - mydomain1.com
+  - mydomain2.net
 ```
 ## Deployment
 ### Docker Example
