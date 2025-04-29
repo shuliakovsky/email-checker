@@ -10,19 +10,23 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	httpSwagger "github.com/swaggo/http-swagger"
+
 	_ "github.com/shuliakovsky/email-checker/docs"
+	"github.com/shuliakovsky/email-checker/internal/auth"
 	"github.com/shuliakovsky/email-checker/internal/checker"
 	"github.com/shuliakovsky/email-checker/internal/lock"
+	"github.com/shuliakovsky/email-checker/internal/logger"
 	"github.com/shuliakovsky/email-checker/internal/metrics"
 	"github.com/shuliakovsky/email-checker/internal/storage"
 	"github.com/shuliakovsky/email-checker/internal/throttle"
 	"github.com/shuliakovsky/email-checker/pkg/types"
-	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // Creates a new Server instance with specified configuration
-func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool, throttleManager *throttle.ThrottleManager) *Server {
+func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool, throttleManager *throttle.ThrottleManager, db *sqlx.DB) *Server {
 	return &Server{
 		storage:         store,
 		redisClient:     redisClient,
@@ -30,6 +34,8 @@ func NewServer(port string, store storage.Storage, redisClient redis.UniversalCl
 		maxWorkers:      maxWorkers,
 		clusterMode:     clusterMode,
 		throttleManager: throttleManager,
+		authService:     auth.NewAuthService(db, redisClient, clusterMode),
+		db:              db,
 	}
 }
 
@@ -47,6 +53,7 @@ func (s *Server) localWorker() {
 
 // Starts the HTTP server and task processing infrastructure
 func (s *Server) Start() error {
+	s.startKeyCleanup()
 	if s.clusterMode {
 		s.startClusterTaskProcessor()
 		s.startStalledTasksRecovery()
@@ -55,15 +62,32 @@ func (s *Server) Start() error {
 	}
 
 	router := http.NewServeMux()
+
+	// cache
 	router.HandleFunc("/cache/flush", s.handleFlushCache)
-	router.Handle("/metrics", promhttp.Handler())
 	router.HandleFunc("/cache/status", s.handleCacheStatus)
-	router.HandleFunc("/tasks", s.handleTasks)
-	router.HandleFunc("/tasks/", s.handleTaskStatus)
-	router.HandleFunc("/tasks-results/", s.handleTaskResults)
-	router.HandleFunc("/tasks-with-webhook", s.handleTasksWithWebhook)
+
+	// keys
+	router.Handle("/keys", AdminMiddleware(http.HandlerFunc(s.handleCreateKey)))
+	router.Handle("GET /admin/keys", AdminMiddleware(http.HandlerFunc(s.handleListKeys)))
+	router.Handle("GET /admin/keys/{api_key}", AdminMiddleware(http.HandlerFunc(s.handleGetKey)))
+	router.Handle("PATCH /admin/keys/{api_key}", AdminMiddleware(http.HandlerFunc(s.handleUpdateKey)))
+	router.Handle("DELETE /admin/keys/{api_key}", AdminMiddleware(http.HandlerFunc(s.handleDeleteKey)))
+
+	//	prometheus metrics
+	router.Handle("/metrics", promhttp.Handler())
+
+	// tasks
+	router.Handle("/tasks", APIKeyMiddleware(s.authService)(http.HandlerFunc(s.handleTasks)))
+	router.Handle("/tasks/", APIKeyMiddleware(s.authService)(http.HandlerFunc(s.handleTaskStatus)))
+	router.Handle("/tasks-results/", APIKeyMiddleware(s.authService)(http.HandlerFunc(s.handleTaskResults)))
+	router.Handle("/tasks-with-webhook", APIKeyMiddleware(s.authService)(http.HandlerFunc(s.handleTasksWithWebhook)))
+
+	// swagger
 	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)
-	loggedRouter := loggingMiddleware(router)
+
+	handler := corsMiddleware(router)
+	loggedRouter := loggingMiddleware(handler)
 	return http.ListenAndServe(":"+s.port, loggedRouter)
 }
 
@@ -185,9 +209,16 @@ func (s *Server) startLocalTaskProcessor() {
 
 // Handles task creation requests
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	key := r.Context().Value("api_key").(*auth.APIKey)
+
 	if r.Method == http.MethodPost {
 		var request struct {
 			Emails []string `json:"emails"`
+		}
+		// check email quota
+		if len(request.Emails) > key.Remaining {
+			respondError(w, http.StatusForbidden, "Not enough remaining checks")
+			return
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -213,6 +244,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			Status:    "pending",
 			Emails:    request.Emails,
 			CreatedAt: time.Now(),
+			APIKey:    key.Key,
 		}
 
 		if err := s.storage.SaveTask(r.Context(), task); err != nil {
@@ -300,9 +332,21 @@ func (s *Server) handleTaskResults(w http.ResponseWriter, r *http.Request) {
 
 // Executes email validation task and updates state
 func (s *Server) processTask(task *types.Task) {
+	// Ensure quota decrement happens even if processing fails
+	defer func() {
+		// Only decrement quota for authenticated requests with results
+		if task.APIKey != "" && len(task.Results) > 0 {
+			// Use background context since request context might be expired
+			err := s.authService.DecrementQuota(context.Background(), task.APIKey, len(task.Results))
+			if err != nil {
+				logger.Log(fmt.Sprintf("Failed to decrement quota: %v", err))
+			}
+		}
+	}()
+
 	ctx := context.Background()
 	task.Status = "processing"
-	_ = s.storage.UpdateTask(ctx, task)
+	_ = s.storage.UpdateTask(ctx, task) // Error ignored for workflow continuity
 
 	cfg := checker.Config{
 		MaxWorkers:     s.maxWorkers,
@@ -367,4 +411,27 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			statusCode,
 		).Inc()
 	})
+}
+
+// startKeyCleanup initiates periodic background cleanup of expired API keys
+func (s *Server) startKeyCleanup() {
+	// Create daily ticker for maintenance tasks
+	ticker := time.NewTicker(24 * time.Hour)
+
+	// Launch background goroutine for recurring cleanup
+	go func() {
+		// Process cleanup on each tick interval
+		for range ticker.C {
+			// Remove expired keys with exhausted quotas
+			_, err := s.db.Exec(`
+                DELETE FROM api_keys 
+                WHERE expires_at < NOW() 
+                AND remaining_checks = 0`)
+
+			if err != nil {
+				// Log failures but continue cleanup schedule
+				logger.Log("Key cleanup failed: " + err.Error())
+			}
+		}
+	}()
 }

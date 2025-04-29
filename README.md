@@ -184,3 +184,16 @@ location /api/ {
 |DNS	| UDP/TCP            |
 
 Report Issues: https://github.com/shuliakovsky/email-checker/issues
+
+
+# Создать API-ключ
+curl -X POST -H "X-Admin-Key: super-secret-admin-key-123" \
+-H "Content-Type: application/json" \
+-d '{"type":"monthly", "initial_checks":1000}' \
+http://localhost:8080/keys
+
+# Проверить сервис
+curl -X POST -H "X-API-Key: YOUR_GENERATED_KEY" \
+-H "Content-Type: application/json" \
+-d '{"emails":["test@example.com"]}' \
+http://localhost:8080/tasks

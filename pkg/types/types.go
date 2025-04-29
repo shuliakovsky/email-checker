@@ -37,6 +37,7 @@ type Task struct {
 	Results   []EmailReport  `json:"results"`           // List of validation results for the processed emails
 	CreatedAt time.Time      `json:"created_at"`        // Timestamp indicating when the task was created
 	Webhook   *WebhookConfig `json:"webhook,omitempty"` // Webhook configuration
+	APIKey    string         `json:"api_key,omitempty"` // APIKey
 }
 
 // WebhookConfig contains the parameters for task status notifications

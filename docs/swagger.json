@@ -9,7 +9,94 @@
   "host": "localhost:8080",
   "basePath": "/",
   "schemes": ["http"],
+  "securityDefinitions": {
+    "ApiKeyAuth": {
+      "type": "apiKey",
+      "name": "X-API-Key",
+      "in": "header"
+    },
+    "AdminKeyAuth": {
+      "type": "apiKey",
+      "name": "X-Admin-Key",
+      "in": "header"
+    }
+  },
   "paths": {
+
+    "/admin/keys": {
+      "get": {
+        "summary": "List all API keys",
+        "tags": ["Administration"],
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/FullAPIKeyDetails"
+              }
+            }
+          }
+        }
+      }
+    },"/admin/keys/{api_key}": {
+      "get": {
+        "summary": "Get key details",
+        "parameters": [
+          {
+            "name": "api_key",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key details",
+            "schema": {
+              "$ref": "#/definitions/FullAPIKeyDetails"
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update key",
+        "parameters": [
+          {
+            "name": "api_key",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/KeyUpdateRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Update status",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {"type": "string"}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete key",
+        "responses": {
+          "204": {
+            "description": "Key deleted"
+          }
+        }
+      }
+    },
     "/cache/status": {
       "get": {
         "summary": "Get cache status",
@@ -216,6 +303,91 @@
     }
   },
   "definitions": {
+    "FullAPIKeyDetails": {
+      "type": "object",
+      "properties": {
+        "api_key": {"type": "string"},
+        "type": {"type": "string"},
+        "remaining": {"type": "integer"},
+        "used": {"type": "integer"},
+        "initial": {"type": "integer"},
+        "created_at": {"type": "string"},
+        "expires_at": {"type": "string"},
+        "last_topup": {"type": "string"}
+      }
+    },
+    "KeyUpdateRequest": {
+      "type": "object",
+      "properties": {
+        "add_checks": {"type": "integer"},
+        "extend_days": {"type": "integer"}
+      }
+    },
+    "CreateKeyRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["pay_as_you_go", "monthly"],
+          "example": "monthly"
+        },
+        "initial_checks": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 1000
+        },
+        "validity_days": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 30
+        }
+      },
+      "required": ["type", "initial_checks"]
+    },
+    "UpdateKeyRequest": {
+      "type": "object",
+      "properties": {
+        "add_checks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "extend_days": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "APIKeyResponse": {
+      "type": "object",
+      "properties": {
+        "api_key": {
+          "type": "string",
+          "example": "abc123def456"
+        },
+        "type": {
+          "type": "string",
+          "example": "monthly"
+        },
+        "remaining_checks": {
+          "type": "integer",
+          "example": 950
+        },
+        "total_checks": {
+          "type": "integer",
+          "example": 1000
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2024-12-31T23:59:59Z"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2024-01-01T00:00:00Z"
+        }
+      }
+    },
     "CacheStatusResponse": {
       "type": "object",
       "properties": {
@@ -460,5 +632,10 @@
         }
       }
     }
-  }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
 }

@@ -40,6 +40,7 @@ func printVersion() {
 // Function to initialize Viper configuration
 func initViper() {
 	// Configure command-line flags
+	pflag.String("admin-key", "", "Admin secret key")
 	pflag.String("dns", "1.1.1.1", "DNS server IP address")
 	pflag.String("emails", "", "Comma-separated email addresses")
 	pflag.Int("workers", 10, "Number of concurrent workers")
@@ -47,14 +48,17 @@ func initViper() {
 	pflag.String("redis-pass", "", "Redis password")
 	pflag.Int("redis-db", 0, "Redis database number")
 	pflag.String("port", "8080", "Server port")
+	pflag.String("pg-host", "localhost", "PostgreSQL host")
+	pflag.Int("pg-port", 5432, "PostgreSQL port")
+	pflag.String("pg-user", "postgres", "PostgreSQL user")
+	pflag.String("pg-password", "", "PostgreSQL password")
+	pflag.String("pg-db", "email_checker", "PostgreSQL database name")
+	pflag.String("pg-ssl", "disable", "PostgreSQL SSL mode")
 	pflag.Bool("server", false, "Run in server mode")
 	pflag.Bool("version", false, "Show version")
 	pflag.StringSlice("helo-domains", nil, "[REQUIRED] List of HELO domains for SMTP rotation (comma-separated)")
-	viper.BindPFlag("helo-domains", pflag.Lookup("helo-domains"))
-	pflag.Parse()
-
-	// Bind flags to Viper settings
 	viper.BindPFlags(pflag.CommandLine)
+	pflag.Parse()
 
 	// Configure environment variables
 	viper.AutomaticEnv()
@@ -115,7 +119,7 @@ func main() {
 		printVersion()
 		log.Fatal("Please specify emails using --emails flag or EMAILS env")
 	}
-	if viper.GetString("helo-domains") == "" {
+	if len(viper.GetStringSlice("helo-domains")) == 0 {
 		printVersion()
 		log.Fatal("HELO domains list is required. Use --helo-domains flag or config file")
 	}
@@ -127,6 +131,12 @@ func main() {
 	}
 	logger.Init(false) // Initialize the logger
 
+	// Domains initialise for CLI mode
+	domains.Init(
+		false, // isClusterMode
+		nil,   // redisClient
+		viper.GetStringSlice("helo-domains"),
+	)
 	// Process emails with in-memory caching
 	emailList := strings.Split(viper.GetString("emails"), ",")
 	results := checker.ProcessEmailsWithConfig(emailList, checker.Config{
@@ -149,6 +159,11 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 	var cacheProvider cache.Provider
 	var store storage.Storage
 	var isCluster bool
+
+	db, err := storage.InitPostgres(viper.GetViper())
+	if err != nil {
+		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
+	}
 
 	if len(heloDomains) == 0 {
 		logger.Log("[FATAL] HELO domains list is empty")
@@ -208,6 +223,7 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 		maxWorkers,
 		isCluster,
 		throttleManager,
+		db,
 	)
 	logger.Log(fmt.Sprintf("Starting server on port %s | DNS: %s | Workers: %d | Redis: %v",
 		port, dns, maxWorkers, redisNodes != ""))

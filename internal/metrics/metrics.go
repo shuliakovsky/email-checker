@@ -69,4 +69,13 @@ var (
 		Name: "smtp_rbl_restrictions_total",
 		Help: "Total RBL restriction errors",
 	})
+	APIKeyChecks = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "apikey_checks_total",
+		Help: "Total checks per API key",
+	}, []string{"key", "type"})
+
+	APIKeyQuota = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "apikey_remaining_quota",
+		Help: "Remaining checks per API key",
+	}, []string{"key"})
 )

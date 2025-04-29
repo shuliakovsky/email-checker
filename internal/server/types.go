@@ -5,7 +5,10 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/jmoiron/sqlx"
+
 	_ "github.com/shuliakovsky/email-checker/docs"
+	"github.com/shuliakovsky/email-checker/internal/auth"
 	"github.com/shuliakovsky/email-checker/internal/storage"
 	"github.com/shuliakovsky/email-checker/internal/throttle"
 )
@@ -26,6 +29,8 @@ type Server struct {
 	maxWorkers      int
 	clusterMode     bool
 	throttleManager *throttle.ThrottleManager
+	authService     *auth.AuthService
+	db              *sqlx.DB
 }
 
 // response writer
