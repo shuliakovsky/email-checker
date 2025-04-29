@@ -63,7 +63,9 @@ func (s *Server) Start() error {
 	router.HandleFunc("/tasks-results/", s.handleTaskResults)
 	router.HandleFunc("/tasks-with-webhook", s.handleTasksWithWebhook)
 	router.HandleFunc("/swagger/", httpSwagger.WrapHandler)
-	loggedRouter := loggingMiddleware(router)
+
+	handler := corsMiddleware(router)
+	loggedRouter := loggingMiddleware(handler)
 	return http.ListenAndServe(":"+s.port, loggedRouter)
 }
 
@@ -366,5 +368,21 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			r.URL.Path,
 			statusCode,
 		).Inc()
+	})
+}
+
+// CORS middleware TODO move that to config
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
