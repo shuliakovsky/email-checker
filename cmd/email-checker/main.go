@@ -50,11 +50,8 @@ func initViper() {
 	pflag.Bool("server", false, "Run in server mode")
 	pflag.Bool("version", false, "Show version")
 	pflag.StringSlice("helo-domains", nil, "[REQUIRED] List of HELO domains for SMTP rotation (comma-separated)")
-	viper.BindPFlag("helo-domains", pflag.Lookup("helo-domains"))
-	pflag.Parse()
-
-	// Bind flags to Viper settings
 	viper.BindPFlags(pflag.CommandLine)
+	pflag.Parse()
 
 	// Configure environment variables
 	viper.AutomaticEnv()
@@ -115,7 +112,7 @@ func main() {
 		printVersion()
 		log.Fatal("Please specify emails using --emails flag or EMAILS env")
 	}
-	if viper.GetString("helo-domains") == "" {
+	if len(viper.GetStringSlice("helo-domains")) == 0 {
 		printVersion()
 		log.Fatal("HELO domains list is required. Use --helo-domains flag or config file")
 	}
@@ -127,6 +124,12 @@ func main() {
 	}
 	logger.Init(false) // Initialize the logger
 
+	// Domains initialise for CLI mode
+	domains.Init(
+		false, // isClusterMode
+		nil,   // redisClient
+		viper.GetStringSlice("helo-domains"),
+	)
 	// Process emails with in-memory caching
 	emailList := strings.Split(viper.GetString("emails"), ",")
 	results := checker.ProcessEmailsWithConfig(emailList, checker.Config{
