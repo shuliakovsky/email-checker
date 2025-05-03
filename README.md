@@ -43,8 +43,12 @@ Email validation tool with MX records check, SMTP verification, disposable domai
 ```shell
 ./email-checker \
   --server \
+  --admin-key "super-secret-admin-key" \
   --port 8080 \
   --dns 8.8.8.8 \
+  --pg-host postgres.example.com \
+  --pg-user checker \
+  --pg-password "dbpassword" \
   --redis "redis-host:6379" \
   --redis-pass "your-password" \
   --workers 20
@@ -54,32 +58,43 @@ Email validation tool with MX records check, SMTP verification, disposable domai
 # Node 1
 ./email-checker \
   --server \
+  --admin-key ${ADMIN_SECRET} \
+  --pg-host "pg1,pg2,pg3" \
   --redis "node1:6379,node2:6379,node3:6379" \
   --workers 15
 
 # Node 2
 ./email-checker \
   --server \
+  --admin-key ${ADMIN_SECRET} \
+  --pg-host "pg1,pg2,pg3" \
   --redis "node1:6379,node2:6379,node3:6379" \
   --workers 15
 ```
+
 ### API Endpoints
- - Method	Endpoint	Description
- - POST	/tasks	Create email validation task
- - POST	/tasks-with-webhook	Create an email validation task with a webhook to receive
- - GET	/tasks/{id}	Get task status
- - GET	/tasks-results/{id}	Get paginated results
- - POST	/cache/flush	Flush all cached data
- - GET	/cache/status	Get cache statistics
  - Swagger UI: [/swagger/](https://shuliakovsky.github.io/email-checker/)
+
 ### Configuration Options
 #### Core Parameters
-| Flag            | Environment variable | Description               | Format                           |
-|-----------------|----------------------|---------------------------|----------------------------------|
-| --dns           | DNS                  | DNS server IP             | 1.1.1.1                          |
-| --workers       | WORKERS              | Concurrent workers        | 10                               |
-| --port	         | PORT                 | API server port	          | 8080                             |
-| --helo-domains  | HELO_DOMAINS         | List of the helo-domains	 | "my-domain.com,..,my-domain.net" |
+| Flag           | Environment variable | Description               | Format                           |
+|----------------|----------------------|---------------------------|----------------------------------|
+| --admin-key    | ADMIN_KEY            | Master admin secret key   | -                                |
+| --dns          | DNS                  | DNS server IP             | 1.1.1.1                          |
+| --workers      | WORKERS              | Concurrent workers        | 10                               |
+| --port	        | PORT                 | API server port	          | 8080                             |
+| --helo-domains | HELO_DOMAINS         | List of the helo-domains	 | "my-domain.com,..,my-domain.net" |
+
+
+### PostreSQL Configuration
+| Flag          | Environment variable | Description       | default       |
+|---------------|----------------------|-------------------|---------------|
+| --pg-host     | PG_HOST              | PostgreSQL hosts  | localhost     |
+| --pg-port     | PG_PORT              | PostgreSQL port   | 5432          |
+| --pg-user     | PG_USER              | Database user	    | postgres      |
+| --pg-password | PG_PASSWORD          | Database password | -             |
+| --pg-db       | PG_DB                | Database name     | email_checker |
+| --pg-ssl      | PG_SSL               | SSL mode	         | disable       |
 
 
 ### Redis Configuration
@@ -96,6 +111,7 @@ dns: 8.8.8.8
 workers: 20
 redis: "redis1:6379,redis2:6379"
 redis-pass: "secret"
+
 helo-domains:
   - mydomain1.com
   - mydomain2.net
@@ -176,24 +192,11 @@ location /api/ {
 ```
 
 ## Support Matrix
-|Component| Supported Versions |
-|---------|--------------------|
-|Redis	| 6.2+               |
-|Go	| 1.19+              |
-|SMTP	| RFC 5321           |
-|DNS	| UDP/TCP            |
+| Component | Supported Versions  |
+|-----------|---------------------|
+| Redis	    | 6.2+                |
+| Go	       | 1.19+               |
+| SMTP	     | RFC 5321            |
+| DNS	      | UDP/TCP             |
 
 Report Issues: https://github.com/shuliakovsky/email-checker/issues
-
-
-# Создать API-ключ
-curl -X POST -H "X-Admin-Key: super-secret-admin-key-123" \
--H "Content-Type: application/json" \
--d '{"type":"monthly", "initial_checks":1000}' \
-http://localhost:8080/keys
-
-# Проверить сервис
-curl -X POST -H "X-API-Key: YOUR_GENERATED_KEY" \
--H "Content-Type: application/json" \
--d '{"emails":["test@example.com"]}' \
-http://localhost:8080/tasks
