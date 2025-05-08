@@ -25,6 +25,7 @@ type TaskStatusResponse struct {
 type Server struct {
 	storage         storage.Storage
 	redisClient     redis.UniversalClient
+	host            string
 	port            string
 	maxWorkers      int
 	clusterMode     bool

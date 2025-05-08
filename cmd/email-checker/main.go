@@ -47,6 +47,7 @@ func initViper() {
 	pflag.String("redis", "", "Redis nodes (comma-separated, format: host:port)")
 	pflag.String("redis-pass", "", "Redis password")
 	pflag.Int("redis-db", 0, "Redis database number")
+	pflag.String("host", "127.0.0.1", "Server host interface")
 	pflag.String("port", "8080", "Server port")
 	pflag.String("pg-host", "localhost", "PostgreSQL host")
 	pflag.Int("pg-port", 5432, "PostgreSQL port")
@@ -102,6 +103,7 @@ func main() {
 	// Start server mode if requested
 	if viper.GetBool("server") {
 		startServerMode(
+			viper.GetString("host"),
 			viper.GetString("port"),
 			viper.GetString("dns"),
 			viper.GetString("redis"),
@@ -153,7 +155,7 @@ func main() {
 }
 
 // Configures and starts server mode with Redis integration (if presents)
-func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorkers int, throttleManager *throttle.ThrottleManager, heloDomains []string) {
+func startServerMode(host, port, dns, redisNodes, redisPass string, redisDB, maxWorkers int, throttleManager *throttle.ThrottleManager, heloDomains []string) {
 	logger.Init(true) // should be the very first command
 	var redisClient redis.UniversalClient
 	var cacheProvider cache.Provider
@@ -217,6 +219,7 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 
 	// Create and start HTTP server
 	server := server.NewServer(
+		host,
 		port,
 		store,
 		redisClient,
@@ -225,8 +228,8 @@ func startServerMode(port, dns, redisNodes, redisPass string, redisDB, maxWorker
 		throttleManager,
 		db,
 	)
-	logger.Log(fmt.Sprintf("Starting server on port %s | DNS: %s | Workers: %d | Redis: %v",
-		port, dns, maxWorkers, redisNodes != ""))
+	logger.Log(fmt.Sprintf("Starting server on host %s port %s | DNS: %s | Workers: %d | Redis: %v",
+		host, port, dns, maxWorkers, redisNodes != ""))
 
 	// Handle potential errors during server startup
 	if err := server.Start(); err != nil {

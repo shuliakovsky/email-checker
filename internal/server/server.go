@@ -26,10 +26,11 @@ import (
 )
 
 // Creates a new Server instance with specified configuration
-func NewServer(port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool, throttleManager *throttle.ThrottleManager, db *sqlx.DB) *Server {
+func NewServer(host string, port string, store storage.Storage, redisClient redis.UniversalClient, maxWorkers int, clusterMode bool, throttleManager *throttle.ThrottleManager, db *sqlx.DB) *Server {
 	return &Server{
 		storage:         store,
 		redisClient:     redisClient,
+		host:            host,
 		port:            port,
 		maxWorkers:      maxWorkers,
 		clusterMode:     clusterMode,
@@ -88,7 +89,7 @@ func (s *Server) Start() error {
 
 	handler := corsMiddleware(router)
 	loggedRouter := loggingMiddleware(handler)
-	return http.ListenAndServe(":"+s.port, loggedRouter)
+	return http.ListenAndServe(s.host+":"+s.port, loggedRouter)
 }
 
 // Lua script for atomic task dequeue with lock acquisition
